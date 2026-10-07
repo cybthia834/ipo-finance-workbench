@@ -1,0 +1,28 @@
+{
+  "stats": {
+    "startTime": "2026-10-07T23:23:01.589Z",
+    "duration": 6319.352,
+    "expected": 4,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "scenarios": [
+    {
+      "name": "PMO navigates real business pages; all runtime requests stay local",
+      "status": "passed"
+    },
+    {
+      "name": "owner sees assigned tasks and cannot open management data",
+      "status": "passed"
+    },
+    {
+      "name": "PMO creates a frozen snapshot through the visible form",
+      "status": "passed"
+    },
+    {
+      "name": "CFO can inspect scope form and published template safely",
+      "status": "passed"
+    }
+  ]
+}

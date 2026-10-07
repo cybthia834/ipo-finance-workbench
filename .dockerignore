@@ -1,0 +1,10 @@
+.venv
+node_modules
+.runtime
+.git
+frontend/dist
+test-results
+playwright-report
+**/__pycache__
+**/.env*
+!deploy/.env.example

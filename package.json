@@ -1,0 +1,23 @@
+{
+  "name": "ipo-finance-workbench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "db": "node scripts/database.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspace frontend",
+    "typecheck": "npm run typecheck --workspace frontend",
+    "test:e2e": "playwright test",
+    "db:prepare": "node scripts/prepare-postgres.mjs",
+    "format": "prettier --write frontend/src scripts/*.mjs tests/e2e playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "embedded-postgres": "18.4.0-beta.17",
+    "prettier": "^3.9.9"
+  }
+}

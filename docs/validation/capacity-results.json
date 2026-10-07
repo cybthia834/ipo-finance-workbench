@@ -1,0 +1,13 @@
+{
+  "environment": "macOS-15.6-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7",
+  "database": "PostgreSQL 18.4",
+  "accounts": 10,
+  "concurrent_users": 5,
+  "checklists": 2112,
+  "metadata_records": 10000,
+  "requests": 100,
+  "p95_ms": 161.83,
+  "max_ms": 163.99,
+  "scope": "TestClient HTTP+real PostgreSQL; excludes network/TLS and browser render latency"
+}

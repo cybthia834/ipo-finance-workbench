@@ -1,0 +1,10 @@
+{
+  "command": ".venv/bin/pytest backend/tests -q --tb=short",
+  "passed": 28,
+  "failed": 0,
+  "duration_seconds": 10.94,
+  "database": "real PostgreSQL 18.4 / finance_test",
+  "warnings": [
+    "Starlette TestClient httpx deprecation warning"
+  ]
+}
