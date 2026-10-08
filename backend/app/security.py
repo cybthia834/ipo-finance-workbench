@@ -8,7 +8,7 @@ from fastapi import Depends, Request
 from sqlalchemy import and_, exists, or_, select
 
 from . import models as m
-from .common import DB, DomainError, digest, require
+from .common import DB, DomainError, digest, require, lock_identity, lock_project
 from .config import settings
 
 hasher = PasswordHasher()
@@ -23,6 +23,10 @@ def verify_password(encoded, password):
 
 
 def current_user(request: Request, db: DB):
+    db.info['read_only_request'] = request.method in ('GET', 'HEAD', 'OPTIONS')
+    exclusive = not db.info['read_only_request'] and (request.url.path.startswith('/api/v1/users') or
+                  request.url.path in ('/api/v1/auth/password', '/api/v1/auth/logout'))
+    lock_identity(db, exclusive=exclusive)
     token = request.cookies.get('finance_session', '')
     session = db.scalar(select(m.Session).where(m.Session.token_hash == digest(token), m.Session.revoked.is_(False)))
     user = db.get(m.User, session.user_id) if session else None
@@ -46,6 +50,7 @@ Actor = Annotated[m.User, Depends(current_user)]
 
 
 def membership(db, user, project_id, roles=None):
+    lock_project(db, project_id)
     member = db.scalar(select(m.Membership).where(m.Membership.project_id == project_id,
                                                 m.Membership.user_id == user.id, m.Membership.active.is_(True)).execution_options(populate_existing=True))
     require(member and member.org_ids and set(member.roles) & {'cfo', 'pmo', 'owner', 'reviewer'},
@@ -80,7 +85,7 @@ def item_query(db, user, project_id):
     q = select(m.Checklist).where(m.Checklist.project_id == project_id, m.Checklist.org_id.in_(member.org_ids))
     if not set(member.roles) & {'cfo', 'pmo'}:
         q = q.where(or_(m.Checklist.owner_id == user.id, m.Checklist.reviewer_id == user.id))
-    return q
+    return q.execution_options(populate_existing=True)
 
 
 def item_access(db, user, item_id):
@@ -108,7 +113,7 @@ def evidence_query(db, user, project_id):
                 m.EvidenceVersion.evidence_id == m.Evidence.id,
                 or_(m.Issue.owner_id == user.id, m.Issue.verifier_id == user.id)))
         q = q.where(or_(m.Evidence.owner_id == user.id, related, issue_related))
-    return q
+    return q.execution_options(populate_existing=True)
 
 
 def evidence_access(db, user, evidence_id):
@@ -124,7 +129,7 @@ def issue_query(db, user, project_id):
     q = select(m.Issue).where(m.Issue.project_id == project_id, m.Issue.org_id.in_(member.org_ids))
     if not set(member.roles) & {'cfo', 'pmo'}:
         q = q.where(or_(m.Issue.owner_id == user.id, m.Issue.verifier_id == user.id))
-    return q
+    return q.execution_options(populate_existing=True)
 
 
 def issue_access(db, user, issue_id):

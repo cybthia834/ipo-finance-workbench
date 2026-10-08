@@ -11,12 +11,12 @@ from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'backend'))
-env = dotenv_values(ROOT / '.runtime/app.env')
+env = dotenv_values(ROOT / '.runtime/phase1/app.env')
 test_url = os.environ.get('TEST_DATABASE_URL') or env['TEST_DATABASE_URL']
 owner_url = os.environ.get('TEST_MIGRATION_DATABASE_URL') or env['TEST_MIGRATION_DATABASE_URL']
-assert make_url(test_url).database == make_url(owner_url).database == 'finance_test', 'Refusing non-test database'
+assert make_url(test_url).database == make_url(owner_url).database == 'finance_phase1_test', 'Refusing non-test database'
 os.environ.update(DATABASE_URL=test_url, MIGRATION_DATABASE_URL=owner_url, APP_ENV='test', DEMO_MODE='true',
-                  EXPORT_STORAGE_ROOT=str(ROOT / '.runtime/test-exports'))
+                  EXPORT_STORAGE_ROOT=str(ROOT / '.runtime/phase1/test-exports'))
 
 from alembic import command
 from alembic.config import Config
@@ -58,7 +58,7 @@ class World:
             assert response.status_code == 200
             client.headers['X-CSRF-Token'] = response.json()['data']['csrf_token']
             self.clients[role] = client
-        project = self.post('cfo', '/projects', {'name': '测试专用虚构项目', 'organizations': [
+        project = self.post('cfo', '/projects', {'initial_cfo_id': self.ids['cfo'], 'name': '测试专用虚构项目', 'organizations': [
             {'code': 'A', 'name': '测试主体一'}, {'code': 'B', 'name': '测试主体二'}],
             'periods': [{'label': '2025年度', 'start': '2025-01-01', 'end': '2025-12-31'}]})
         self.pid = project['id']

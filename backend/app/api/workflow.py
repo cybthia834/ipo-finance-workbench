@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from .. import models as m, schemas as s
 from ..common import DB, DomainError, audit, bump, check_version, command, digest, lock_project, ok, record, require
 from ..security import Actor, assigned, distinct, evidence_access, evidence_query, item_access, item_query, membership, scoped_org
-from ..services import generation_preview, pack_items
+from ..services import generation_preview, pack_items, effective_item_state, today
 
 router = APIRouter()
 
@@ -16,10 +16,10 @@ def preview(project_id: str, body: s.Generation, actor: Actor, db: DB):
 
 @router.post('/projects/{project_id}/checklist-jobs', status_code=202)
 def generation_job(project_id: str, body: s.Generation, request: Request, actor: Actor, db: DB):
-    lock_project(db, project_id); membership(db, actor, project_id, ['cfo', 'pmo'])
+    lock_project(db, project_id); member = membership(db, actor, project_id, ['cfo', 'pmo'])
     payload = body.model_dump(); generation_preview(db, actor, project_id, payload)
     def run():
-        job = m.Job(project_id=project_id, actor_id=actor.id, kind='generate', payload=payload)
+        job = m.Job(project_id=project_id, actor_id=actor.id, kind='generate', payload={**payload, 'org_ids': sorted(member.org_ids)})
         db.add(job); db.flush(); audit(db, actor, job.id, 'checklist_job_created', project_id)
         return record(job)
     return ok(command(db, actor, request, payload, run))
@@ -28,9 +28,10 @@ def generation_job(project_id: str, body: s.Generation, request: Request, actor:
 @router.get('/jobs/{job_id}')
 def get_job(job_id: str, actor: Actor, db: DB):
     job = db.get(m.Job, job_id); require(job, 'NOT_FOUND', '任务不存在', 404)
-    membership(db, actor, job.project_id, ['cfo', 'pmo'])
+    mem = membership(db, actor, job.project_id, ['cfo', 'pmo'])
     require(job.actor_id == actor.id, 'JOB_FORBIDDEN', '只能查看本人任务')
-    return ok(record(job))
+    require(set(job.payload.get('org_ids', [])) <= set(mem.org_ids), 'JOB_SCOPE_REVOKED', '任务范围授权已撤销')
+    return ok(record(job, ('attempt_token',)))
 
 
 @router.get('/projects/{project_id}/checklists')
@@ -45,13 +46,15 @@ def list_items(project_id: str, actor: Actor, db: DB, q: str = '', org_id: str |
     query = query.join(m.TemplateItem, m.TemplateItem.id == m.Checklist.template_item_id)
     if domain: query = query.where(m.TemplateItem.domain == domain)
     if q: query = query.where(m.TemplateItem.title.contains(q, autoescape=True) | m.Checklist.topic_code.contains(q, autoescape=True))
-    # Apply derived validity before pagination so totals and displayed states agree.
-    packed = pack_items(db, db.scalars(query.order_by(m.Checklist.due.asc().nulls_last(), m.Checklist.topic_code, m.Checklist.id)).all())
-    if state == 'overdue': packed = [r for r in packed if r['overdue']]
-    elif state == 'restricted': packed = [r for r in packed if r['state'] in ('restricted_pending', 'restricted_verified')]
-    elif state: packed = [r for r in packed if r['state'] == state]
+    effective = effective_item_state()
+    if state == 'overdue': query = query.where(m.Checklist.due < today(), effective.not_in(['accepted', 'restricted_verified']))
+    elif state == 'restricted': query = query.where(effective.in_(['restricted_pending', 'restricted_verified']))
+    elif state: query = query.where(effective == state)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    packed = pack_items(db, db.scalars(query.order_by(m.Checklist.due.asc().nulls_last(), m.Checklist.topic_code, m.Checklist.id)
+                        .offset((page - 1) * page_size).limit(page_size)).all())
     audit(db, actor, project_id, 'checklist_searched', project_id)
-    return ok({'items': packed[(page - 1) * page_size:page * page_size], 'total': len(packed), 'page': page, 'page_size': page_size})
+    return ok({'items': packed, 'total': total, 'page': page, 'page_size': page_size})
 
 
 @router.get('/checklists/{item_id}')
@@ -64,7 +67,11 @@ def item_detail(item_id: str, actor: Actor, db: DB):
     gaps = db.scalars(select(m.Gap).where(m.Gap.item_id == item_id)).all()
     approvals = db.scalars(select(m.Approval).where(m.Approval.item_id == item_id)).all()
     audit(db, actor, item_id, 'checklist_viewed', row.project_id)
-    return ok({'item': pack_items(db, [row])[0], 'evidence': evidence_rows, 'reviews': [record(x) for x in reviews],
+    latest_id = db.get(m.Project, row.project_id).template_version_id
+    latest = db.scalar(select(m.TemplateItem).where(m.TemplateItem.version_id == latest_id, m.TemplateItem.code == row.topic_code))
+    decisions = db.scalars(select(m.TemplateDecision).where(m.TemplateDecision.item_id == row.id).order_by(m.TemplateDecision.created_at.desc())).all()
+    return ok({'template_upgrade': record(latest) if latest and latest.id != row.template_item_id else None,
+               'template_decisions': [record(d) for d in decisions], 'item': pack_items(db, [row])[0], 'evidence': evidence_rows, 'reviews': [record(x) for x in reviews],
                'submissions': [{**record(x), 'version_ids': list(db.scalars(select(m.SubmissionRef.version_id).where(m.SubmissionRef.submission_id == x.id)))} for x in submissions],
                'gaps': [record(x) for x in gaps], 'approvals': [record(x) for x in approvals]})
 
@@ -153,12 +160,18 @@ def create_evidence(project_id: str, body: s.EvidenceCreate, request: Request, a
 
 
 @router.get('/projects/{project_id}/evidence')
-def list_evidence(project_id: str, actor: Actor, db: DB, q: str = ''):
+def list_evidence(project_id: str, actor: Actor, db: DB, q: str = '', org_id: str | None = None,
+                  period_id: str | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     query = evidence_query(db, actor, project_id)
     if q: query = query.where(m.Evidence.code.contains(q, autoescape=True))
-    rows = db.scalars(query.order_by(m.Evidence.created_at.desc())).all()
+    if org_id: query = query.where(m.Evidence.org_id == org_id)
+    if period_id: query = query.where(m.Evidence.period_id == period_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = db.scalars(query.order_by(m.Evidence.created_at.desc(), m.Evidence.id).offset((page - 1) * page_size).limit(page_size)).all()
+    versions = {v.id: record(v) for v in db.scalars(select(m.EvidenceVersion).where(m.EvidenceVersion.id.in_([e.current_version_id for e in rows])))}
     audit(db, actor, project_id, 'evidence_searched', project_id)
-    return ok([{**record(e), 'version': record(db.get(m.EvidenceVersion, e.current_version_id))} for e in rows])
+    return ok({'items': [{**record(e), 'version': versions[e.current_version_id]} for e in rows],
+               'total': total, 'page': page, 'page_size': page_size})
 
 
 @router.get('/evidence/{evidence_id}')
@@ -259,10 +272,38 @@ def review(item_id: str, body: s.ReviewInput, request: Request, actor: Actor, db
             require(all(v.content['acquisition'] == 'located' for v in versions),
                     'RESTRICTED_REVIEW_REQUIRED', '受限目录需记录独立离线核查结果', 422)
         if body.decision == 'restricted_verified':
+            require(any(v.content['acquisition'] == 'restricted' for v in versions), 'RESTRICTED_EVIDENCE_REQUIRED', '受限核查必须包含受限目录', 422)
+            require(body.verified_at is None or (body.verified_at.tzinfo and body.verified_at <= m.now()), 'INVALID_VERIFICATION_TIME', '核查时间不可晚于当前时间', 422)
             require(body.verification_method and len(body.verification_method) >= 3, 'METHOD_REQUIRED', '请记录获准的离线核查方式', 422)
         review = m.Review(item_id=row.id, submission_id=submission.id, reviewer_id=actor.id, decision=body.decision,
-                          checks=body.checks, reason=body.reason + (f'；方式：{body.verification_method}' if body.verification_method else ''))
+                          checks=body.checks, reason=body.reason, verification_method=body.verification_method,
+                          verified_at=(body.verified_at or m.now()) if body.decision == 'restricted_verified' else None)
         db.add(review); row.state = {'accept': 'accepted', 'return': 'returned', 'restricted_verified': 'restricted_verified'}[body.decision]; bump(row)
         audit(db, actor, row.id, 'review_completed', row.project_id)
+        return record(row)
+    return ok(command(db, actor, request, body.model_dump(), run))
+
+
+@router.post('/checklists/{item_id}/template-decisions')
+def template_decision(item_id: str, body: s.TemplateUpgrade, request: Request, actor: Actor, db: DB):
+    row = item_access(db, actor, item_id)
+    membership(db, actor, row.project_id, ['cfo', 'pmo'])
+    new = db.get(m.TemplateItem, body.new_template_item_id)
+    version = db.get(m.TemplateVersion, new.version_id) if new else None
+    require(new and version.project_id == row.project_id and version.state == 'published' and new.code == row.topic_code,
+            'TEMPLATE_SCOPE_MISMATCH', '新标准须来自本项目同一主题的已发布模板', 422)
+    def run():
+        check_version(row, body.expected_version)
+        old = db.get(m.TemplateItem, row.template_item_id)
+        old_version = db.get(m.TemplateVersion, old.version_id)
+        require(version.number > old_version.number, 'TEMPLATE_NOT_NEWER', '只能评估更新版本', 409)
+        decision = m.TemplateDecision(item_id=row.id, old_template_item_id=row.template_item_id,
+            new_template_item_id=new.id, actor_id=actor.id, decision=body.decision, reason=body.reason)
+        db.add(decision)
+        if body.decision == 'adopt':
+            row.template_item_id = new.id
+            if row.state in ('accepted', 'restricted_verified', 'submitted', 'reviewing'):
+                row.state = 'needs_review'
+        bump(row); audit(db, actor, row.id, 'template_' + body.decision, row.project_id)
         return record(row)
     return ok(command(db, actor, request, body.model_dump(), run))

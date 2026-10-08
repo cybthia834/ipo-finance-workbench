@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 const credentials = JSON.parse(
-  readFileSync(".runtime/demo-credentials.json", "utf8"),
+  readFileSync(".runtime/phase1/demo-credentials.json", "utf8"),
 );
 
 async function login(page: Page, role: string) {
@@ -103,7 +103,7 @@ test("CFO can inspect scope form and published template safely", async ({
   await expect(
     page.getByText("固定版本", { exact: true }).first(),
   ).toBeVisible();
-  await expect(page.locator('.ant-modal')).toHaveCSS('opacity', '1');
+  await expect(page.locator(".ant-modal")).toHaveCSS("opacity", "1");
   await page.screenshot({
     path: ".runtime/template-preview.png",
     fullPage: true,

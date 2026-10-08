@@ -1,28 +1,29 @@
 {
+  "date": "2026-10-08",
+  "command": "npm run test:e2e",
   "stats": {
-    "startTime": "2026-10-07T23:23:01.589Z",
-    "duration": 6319.352,
-    "expected": 4,
+    "startTime": "2026-10-08T00:31:35.443Z",
+    "duration": 15864.489000000001,
+    "expected": 6,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0
   },
-  "scenarios": [
-    {
-      "name": "PMO navigates real business pages; all runtime requests stay local",
-      "status": "passed"
-    },
-    {
-      "name": "owner sees assigned tasks and cannot open management data",
-      "status": "passed"
-    },
-    {
-      "name": "PMO creates a frozen snapshot through the visible form",
-      "status": "passed"
-    },
-    {
-      "name": "CFO can inspect scope form and published template safely",
-      "status": "passed"
-    }
+  "viewport": {
+    "width": 1440,
+    "height": 1050
+  },
+  "browser": "installed Chrome, headless, isolated context",
+  "coverage": [
+    "PMO page navigation and no external application requests",
+    "Owner management access rejection",
+    "Visible snapshot creation",
+    "Scope and published template views",
+    "Directory registration, independent review and replacement invalidation",
+    "IT account administration without business membership"
+  ],
+  "limitations": [
+    "Only installed Chrome was exercised; not the latest two supported versions across company desktop environments.",
+    "Capacity measurements are API+PostgreSQL, not browser end-to-end P95."
   ]
 }

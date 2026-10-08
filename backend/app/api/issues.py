@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Query, Request
+from sqlalchemy import func, select
 
 from .. import models as m, schemas as s
 from ..common import DB, audit, bump, check_version, command, lock_project, ok, record, require
 from ..security import Actor, assigned, distinct, evidence_access, issue_access, issue_query, item_access, membership, scoped_org
-from ..services import pack_issues
+from ..services import pack_issues, today
 
 router = APIRouter()
 
@@ -14,7 +14,11 @@ def new_gap(project_id: str, body: s.GapInput, request: Request, actor: Actor, d
     row = item_access(db, actor, body.item_id); require(row.project_id == project_id)
     lock_project(db, project_id); membership(db, actor, project_id, ['cfo', 'pmo', 'reviewer'])
     def run():
-        gap = m.Gap(**body.model_dump(), author_id=actor.id); db.add(gap); db.flush()
+        submission = db.scalar(select(m.Submission).where(m.Submission.item_id == row.id).order_by(m.Submission.created_at.desc()).limit(1))
+        provenance = {'template_item_id': row.template_item_id, 'item_version': row.row_version,
+            'submission_id': submission.id if submission else None,
+            'evidence_version_ids': list(db.scalars(select(m.SubmissionRef.version_id).where(m.SubmissionRef.submission_id == submission.id))) if submission else []}
+        gap = m.Gap(**body.model_dump(), author_id=actor.id, provenance=provenance); db.add(gap); db.flush()
         audit(db, actor, gap.id, 'gap_created', project_id)
         return record(gap)
     return ok(command(db, actor, request, body.model_dump(), run))
@@ -42,16 +46,18 @@ def new_issue(project_id: str, body: s.IssueCreate, request: Request, actor: Act
 
 @router.get('/projects/{project_id}/issues')
 def issues(project_id: str, actor: Actor, db: DB, state: str | None = None, severity: str | None = None,
-           org_id: str | None = None, overdue: bool = False):
+           org_id: str | None = None, overdue: bool = False, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     query = issue_query(db, actor, project_id)
     if state == 'open': query = query.where(m.Issue.state != 'closed')
     elif state: query = query.where(m.Issue.state == state)
     if severity: query = query.where(m.Issue.severity == severity)
     if org_id: query = query.where(m.Issue.org_id == org_id)
-    rows = pack_issues(db, db.scalars(query.order_by(m.Issue.severity, m.Issue.current_due)).all())
-    if overdue: rows = [r for r in rows if r['overdue']]
+    if overdue: query = query.where(m.Issue.current_due < today(), m.Issue.state != 'closed')
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = pack_issues(db, db.scalars(query.order_by(m.Issue.severity, m.Issue.current_due, m.Issue.id)
+                       .offset((page - 1) * page_size).limit(page_size)).all())
     audit(db, actor, project_id, 'issues_searched', project_id)
-    return ok(rows)
+    return ok({'items': rows, 'total': total, 'page': page, 'page_size': page_size})
 
 
 @router.get('/issues/{issue_id}')
@@ -73,6 +79,7 @@ def valid_versions(db, actor, row, ids):
         e = evidence_access(db, actor, v.evidence_id)
         require(e.project_id == row.project_id and e.org_id == row.org_id and e.current_version_id == v.id,
                 'EVIDENCE_INVALID', '证据范围或版本已经失效', 409)
+        require(v.content['acquisition'] == 'located', 'OFFLINE_VERIFICATION_REQUIRED', '整改证据需已定位；受限资料先完成独立离线核查', 422)
 
 
 @router.post('/issues/{issue_id}/{action}')
@@ -83,7 +90,8 @@ def issue_action(issue_id: str, action: str, body: s.IssueActionInput, request: 
         require(row.owner_id == actor.id, 'OWNER_REQUIRED', '仅整改Owner可执行')
     elif action in ('verifications', 'return'):
         require(row.verifier_id == actor.id, 'VERIFIER_REQUIRED', '仅独立验证人可操作')
-        distinct(db, actor, [row.owner_id, row.submitted_by])
+        historical_actors = list(db.scalars(select(m.IssueAction.actor_id).where(m.IssueAction.issue_id == row.id, m.IssueAction.action.in_(['actions', 'submit-verification']))))
+        distinct(db, actor, [row.owner_id, row.submitted_by] + historical_actors)
     else:
         mem = membership(db, actor, row.project_id)
         require(row.verifier_id == actor.id or 'cfo' in mem.roles, 'ROLE_FORBIDDEN', '需要验证人或CFO权限')

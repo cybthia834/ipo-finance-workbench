@@ -7,7 +7,7 @@
   "checklists": 2112,
   "metadata_records": 10000,
   "requests": 100,
-  "p95_ms": 161.83,
-  "max_ms": 163.99,
+  "p95_ms": 190.45,
+  "max_ms": 280.85,
   "scope": "TestClient HTTP+real PostgreSQL; excludes network/TLS and browser render latency"
 }

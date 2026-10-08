@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, App as AntApp, Empty, Spin, Tag } from "antd";
 import { api, stateNames } from "./api";
 
-export function useData<T = any>(path: string, revision = 0) {
+export function useData<T = any>(path: string | null, revision = 0) {
   const [data, setData] = useState<T>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -11,6 +11,10 @@ export function useData<T = any>(path: string, revision = 0) {
     setLoading(true);
     setData(undefined);
     setError("");
+    if (!path) {
+      setLoading(false);
+      return;
+    }
     api<T>(path)
       .then((value) => {
         if (active) setData(value);

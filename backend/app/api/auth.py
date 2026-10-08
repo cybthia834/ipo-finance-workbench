@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 
 from .. import models as m, schemas as s
-from ..common import DB, audit, digest, lock_project, ok, require, user_info
+from ..common import DB, audit, digest, lock_identity, lock_project, ok, require, user_info, command, check_version, bump
 from ..config import settings
 from ..security import Actor, DUMMY_HASH, hasher, verify_password
 
@@ -15,6 +15,7 @@ router = APIRouter()
 
 @router.post('/auth/login')
 def login(body: s.Login, request: Request, response: Response, db: DB):
+    lock_identity(db, exclusive=True)
     require(request.headers.get('origin') == settings.app_origin, 'ORIGIN_REJECTED', '请求来源无效')
     user = db.scalar(select(m.User).where(m.User.username == body.username).with_for_update())
     good = verify_password(user.password_hash if user else DUMMY_HASH, body.password)
@@ -68,24 +69,53 @@ def change_password(body: s.PasswordChange, actor: Actor, db: DB, response: Resp
 
 
 @router.post('/users')
-def create_user(body: s.UserCreate, actor: Actor, db: DB):
+def create_user(body: s.UserCreate, request: Request, actor: Actor, db: DB):
     require(actor.identity_admin, 'ROLE_FORBIDDEN', '需要身份管理员权限')
     lock_project(db, 'identity-account-limit')
-    count = len(db.scalars(select(m.User.id).where(m.User.active.is_(True))).all())
-    require(count < 10, 'ACCOUNT_LIMIT', '第一阶段最多10个活动账号', 409)
-    user = m.User(username=body.username, display_name=body.display_name, person_id=body.person_id,
-                  password_hash=hasher.hash(body.password))
-    db.add(user); db.flush()
-    audit(db, actor, user.id, 'user_created')
-    return ok(user_info(user))
+    def run():
+        count = len(db.scalars(select(m.User.id).where(m.User.active.is_(True))).all())
+        require(count < 10, 'ACCOUNT_LIMIT', '第一阶段最多10个活动账号', 409)
+        user = m.User(username=body.username, display_name=body.display_name, person_id=body.person_id,
+                      password_hash=hasher.hash(body.password))
+        db.add(user); db.flush()
+        audit(db, actor, user.id, 'user_created')
+        return user_info(user)
+    # Persist a digest, never an initial password, in the idempotency record.
+    return ok(command(db, actor, request, {**body.model_dump(exclude={'password'}), 'password_digest': digest(body.password)}, run))
 
 
-@router.post('/users/{user_id}/disable')
-def disable_user(user_id: str, actor: Actor, db: DB):
-    require(actor.identity_admin and actor.id != user_id, 'ROLE_FORBIDDEN', '无权停用此账号')
-    user = db.get(m.User, user_id)
-    require(user, 'NOT_FOUND', '账号不存在', 404)
-    user.active = False
-    db.execute(update(m.Session).where(m.Session.user_id == user_id).values(revoked=True))
-    audit(db, actor, user_id, 'user_disabled')
-    return ok({'disabled': True})
+@router.get('/users')
+def users(actor: Actor, db: DB):
+    require(actor.identity_admin, 'ROLE_FORBIDDEN', '需要身份管理员权限')
+    audit(db, actor, 'identity', 'users_viewed')
+    return ok([user_info(u) for u in db.scalars(select(m.User).order_by(m.User.username))])
+
+
+@router.post('/users/{user_id}/status')
+def user_status(user_id: str, body: s.UserStatus, request: Request, actor: Actor, db: DB):
+    require(actor.identity_admin and actor.id != user_id, 'ROLE_FORBIDDEN', '无权修改此账号状态')
+    user = db.get(m.User, user_id); require(user, 'NOT_FOUND', '账号不存在', 404)
+    def run():
+        check_version(user, body.expected_version)
+        if body.active and not user.active:
+            require(len(db.scalars(select(m.User.id).where(m.User.active.is_(True))).all()) < 10,
+                    'ACCOUNT_LIMIT', '第一阶段最多10个活动账号', 409)
+        user.active = body.active; bump(user)
+        db.execute(update(m.Session).where(m.Session.user_id == user_id).values(revoked=True))
+        audit(db, actor, user_id, 'user_enabled' if body.active else 'user_disabled')
+        return user_info(user)
+    return ok(command(db, actor, request, body.model_dump(), run))
+
+
+@router.post('/users/{user_id}/password-reset')
+def reset_password(user_id: str, body: s.PasswordReset, request: Request, actor: Actor, db: DB):
+    require(actor.identity_admin and actor.id != user_id, 'ROLE_FORBIDDEN', '无权重置此账号密码')
+    user = db.get(m.User, user_id); require(user, 'NOT_FOUND', '账号不存在', 404)
+    def run():
+        check_version(user, body.expected_version)
+        user.password_hash = hasher.hash(body.new_password)
+        user.must_change_password = True; user.failed_logins = 0; user.locked_until = None; bump(user)
+        db.execute(update(m.Session).where(m.Session.user_id == user_id).values(revoked=True))
+        audit(db, actor, user_id, 'password_reset')
+        return user_info(user)
+    return ok(command(db, actor, request, {**body.model_dump(exclude={'new_password'}), 'password_digest': digest(body.new_password)}, run))

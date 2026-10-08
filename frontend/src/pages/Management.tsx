@@ -25,7 +25,7 @@ import {
 } from "@ant-design/icons";
 import { useWork } from "../App";
 import { api, roleNames } from "../api";
-import { LoadState, NoData, PageTitle, useAction, useData } from "../shared";
+import { LoadState, PageTitle, useAction, useData } from "../shared";
 
 export function Reports() {
   const { ctx, me } = useWork();
@@ -418,6 +418,9 @@ export function Reports() {
 export function Settings() {
   const { ctx, me, refresh } = useWork();
   const [scopeOpen, setScopeOpen] = useState(false);
+  const { data: candidates } = useData<any[]>(
+    `/projects/${ctx.project.id}/member-candidates`,
+  );
   const [modal, setModal] = useState("");
   const [target, setTarget] = useState<any>();
   const [template, setTemplate] = useState<any>();
@@ -769,7 +772,7 @@ export function Settings() {
                   rules={[{ required: true }]}
                 >
                   <Select
-                    options={ctx.users.map((u) => ({
+                    options={(candidates || []).map((u) => ({
                       value: u.id,
                       label: u.display_name,
                     }))}
@@ -872,18 +875,28 @@ export function Settings() {
 
 export function AuditPage() {
   const { ctx } = useWork();
-  const { data, loading, error } = useData(`/projects/${ctx.project.id}/audit`);
+  const [page, setPage] = useState(1);
+  const { data, loading, error } = useData(
+    `/projects/${ctx.project.id}/audit?page=${page}`,
+  );
   return (
     <>
       <PageTitle
         title="审计记录"
-        subtitle="查看最近100次项目操作。审计仅追加，业务账号不能修改或删除。"
+        subtitle="按页查看项目操作。审计仅追加，业务账号不能修改或删除。"
       />
       <Card>
         <LoadState loading={loading} error={error}>
           <Table
             rowKey="id"
-            dataSource={data}
+            dataSource={data?.items}
+            pagination={{
+              current: page,
+              pageSize: 20,
+              total: data?.total,
+              showSizeChanger: false,
+              onChange: setPage,
+            }}
             columns={[
               {
                 title: "时间",

@@ -142,6 +142,20 @@
       }
     },
     "/api/v1/users": {
+      "get": {
+        "summary": "Users",
+        "operationId": "users_api_v1_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
       "post": {
         "summary": "Create User",
         "operationId": "create_user_api_v1_users_post",
@@ -177,10 +191,10 @@
         }
       }
     },
-    "/api/v1/users/{user_id}/disable": {
+    "/api/v1/users/{user_id}/status": {
       "post": {
-        "summary": "Disable User",
-        "operationId": "disable_user_api_v1_users__user_id__disable_post",
+        "summary": "User Status",
+        "operationId": "user_status_api_v1_users__user_id__status_post",
         "parameters": [
           {
             "name": "user_id",
@@ -192,6 +206,63 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserStatus"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{user_id}/password-reset": {
+      "post": {
+        "summary": "Reset Password",
+        "operationId": "reset_password_api_v1_users__user_id__password_reset_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -222,7 +293,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProjectCreate"
+                "$ref": "#/components/schemas/ProjectBootstrap"
               }
             }
           },
@@ -359,6 +430,43 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/member-candidates": {
+      "get": {
+        "summary": "Member Candidates",
+        "operationId": "member_candidates_api_v1_projects__project_id__member_candidates_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1225,6 +1333,61 @@
               "default": "",
               "title": "Q"
             }
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "period_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
           }
         ],
         "responses": {
@@ -1474,6 +1637,53 @@
         }
       }
     },
+    "/api/v1/checklists/{item_id}/template-decisions": {
+      "post": {
+        "summary": "Template Decision",
+        "operationId": "template_decision_api_v1_checklists__item_id__template_decisions_post",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateUpgrade"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/projects/{project_id}/gaps": {
       "post": {
         "summary": "New Gap",
@@ -1636,6 +1846,29 @@
               "type": "boolean",
               "default": false,
               "title": "Overdue"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
             }
           }
         ],
@@ -2169,6 +2402,29 @@
             "schema": {
               "type": "string",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
             }
           }
         ],
@@ -2951,6 +3207,35 @@
         ],
         "title": "PasswordChange"
       },
+      "PasswordReset": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 12,
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "expected_version",
+          "new_password"
+        ],
+        "title": "PasswordReset"
+      },
       "PeriodInput": {
         "properties": {
           "label": {
@@ -3022,6 +3307,57 @@
           "expires_at"
         ],
         "title": "PolicyInput"
+      },
+      "ProjectBootstrap": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "sse",
+              "szse"
+            ],
+            "title": "Exchange",
+            "default": "unknown"
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/OrgInput"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Organizations"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodInput"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Periods"
+          },
+          "initial_cfo_id": {
+            "type": "string",
+            "title": "Initial Cfo Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "organizations",
+          "periods",
+          "initial_cfo_id"
+        ],
+        "title": "ProjectBootstrap"
       },
       "ProjectCreate": {
         "properties": {
@@ -3133,6 +3469,18 @@
               }
             ],
             "title": "Verification Method"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
           }
         },
         "additionalProperties": false,
@@ -3313,6 +3661,42 @@
         ],
         "title": "TemplateEntry"
       },
+      "TemplateUpgrade": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "new_template_item_id": {
+            "type": "string",
+            "title": "New Template Item Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "adopt",
+              "retain"
+            ],
+            "title": "Decision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "expected_version",
+          "new_template_item_id",
+          "decision"
+        ],
+        "title": "TemplateUpgrade"
+      },
       "UserCreate": {
         "properties": {
           "username": {
@@ -3348,6 +3732,33 @@
           "password"
         ],
         "title": "UserCreate"
+      },
+      "UserStatus": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "expected_version",
+          "active"
+        ],
+        "title": "UserStatus"
       },
       "ValidationError": {
         "properties": {

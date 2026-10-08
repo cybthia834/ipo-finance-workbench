@@ -1,6 +1,6 @@
 import { Alert, Button, Form, Input, Select, Space } from "antd";
 import { api } from "../api";
-import { useAction } from "../shared";
+import { useAction, useData } from "../shared";
 
 export function ScopeEditor({
   context,
@@ -10,6 +10,7 @@ export function ScopeEditor({
   onSaved: () => void;
 }) {
   const { run, busy } = useAction();
+  const { data: accounts } = useData<any[]>(context ? null : "/users");
   const initial = context
     ? {
         name: context.project.name,
@@ -64,6 +65,19 @@ export function ScopeEditor({
           ]}
         />
       </Form.Item>
+      {!context && (
+        <Form.Item
+          name="initial_cfo_id"
+          label="项目财务负责人"
+          rules={[{ required: true }]}
+        >
+          <Select
+            options={accounts
+              ?.filter((u) => u.active)
+              .map((u) => ({ value: u.id, label: u.display_name }))}
+          />
+        </Form.Item>
+      )}
       <h3>项目主体</h3>
       <Form.List
         name="organizations"

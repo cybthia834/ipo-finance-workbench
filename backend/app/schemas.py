@@ -52,12 +52,25 @@ class MemberInput(Input):
     org_ids: list[str] = Field(min_length=1)
 
 
+class ProjectBootstrap(ProjectCreate):
+    initial_cfo_id: str
+
+
 class Versioned(Input):
     expected_version: int = Field(ge=1)
 
 
 class Reason(Input):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class UserStatus(Versioned, Reason):
+    active: bool
+
+
+class PasswordReset(Versioned, Reason):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
+    new_password: str = Field(min_length=12, max_length=200)
 
 
 class Generation(Input):
@@ -132,6 +145,12 @@ class ReviewInput(Versioned, Reason):
     checks: list[str]
     evidence_version_ids: list[str] = Field(min_length=1)
     verification_method: str | None = Field(default=None, max_length=100)
+    verified_at: datetime | None = None
+
+
+class TemplateUpgrade(Versioned, Reason):
+    new_template_item_id: str
+    decision: Literal['adopt', 'retain']
 
 
 class GapInput(Input):

@@ -33,6 +33,7 @@ class User(Entity, Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class Session(Entity, Base):
@@ -205,6 +206,8 @@ class Review(Entity, Base):
     decision: Mapped[str] = mapped_column(String(24))
     checks: Mapped[list[str]] = mapped_column(JSONB)
     reason: Mapped[str] = mapped_column(String(500))
+    verification_method: Mapped[str | None] = mapped_column(String(100))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Gap(Entity, Base):
@@ -213,6 +216,17 @@ class Gap(Entity, Base):
     facts: Mapped[str] = mapped_column(String(500))
     kind: Mapped[str] = mapped_column(String(40))
     author_id: Mapped[str] = mapped_column(ForeignKey('user_account.id'))
+    provenance: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class TemplateDecision(Entity, Base):
+    __tablename__ = 'template_upgrade_decision'
+    item_id: Mapped[str] = mapped_column(ForeignKey('checklist_item.id'), index=True)
+    old_template_item_id: Mapped[str] = mapped_column(ForeignKey('template_item_version.id'))
+    new_template_item_id: Mapped[str] = mapped_column(ForeignKey('template_item_version.id'))
+    actor_id: Mapped[str] = mapped_column(ForeignKey('user_account.id'))
+    decision: Mapped[str] = mapped_column(String(12))
+    reason: Mapped[str] = mapped_column(String(500))
 
 
 class Issue(Entity, Base):
@@ -288,6 +302,7 @@ class Export(Entity, Base):
     path: Mapped[str] = mapped_column(Text)
     artifact_hash: Mapped[str] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Job(Entity, Base):
@@ -300,6 +315,10 @@ class Job(Entity, Base):
     result: Mapped[dict | None] = mapped_column(JSONB)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(60))
+    attempt_token: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Idempotency(Entity, Base):
@@ -346,4 +365,4 @@ class AuditEvent(Entity, Base):
 Index('ix_item_scope_state', Checklist.project_id, Checklist.org_id, Checklist.state)
 IMMUTABLE_TABLES = ['project_scope_version', 'evidence_version', 'checklist_submission',
                     'submission_evidence_ref', 'review', 'gap', 'issue_action', 'snapshot',
-                    'audit_event', 'metric_sample']
+                    'audit_event', 'metric_sample', 'template_upgrade_decision']

@@ -1,7 +1,7 @@
 """Local fictional cluster cold-backup exercise. Never accepts a custom source directory.
 
 Temporarily stops only this project's embedded PostgreSQL, copies a clean shutdown
-cluster, immediately restarts the source, then boots an isolated copy on 55433.
+cluster, immediately restarts the source, then boots an isolated copy on 55435.
 This is not an independent failure-domain backup or a production backup strategy.
 """
 import json
@@ -14,10 +14,10 @@ from pathlib import Path
 import psycopg
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = ROOT / '.runtime'
+RUNTIME = ROOT / '.runtime/phase1'
 SOURCE = RUNTIME / 'postgres'
 BIN = ROOT / 'node_modules/@embedded-postgres/darwin-arm64/native/bin'
-assert SOURCE.resolve() == ROOT / '.runtime/postgres'
+assert SOURCE.resolve() == ROOT / '.runtime/phase1/postgres'
 assert (SOURCE / 'PG_VERSION').read_text().strip() == '18'
 secret = json.loads((RUNTIME / 'database.json').read_text())
 directory = RUNTIME / 'recovery' / time.strftime('%Y%m%d-%H%M%S')
@@ -35,7 +35,7 @@ def pgctl(data, action, port):
 
 
 def connection(port):
-    return psycopg.connect(host='127.0.0.1', port=port, dbname='finance_dev', user='finance_owner', password=secret['owner'])
+    return psycopg.connect(host='127.0.0.1', port=port, dbname='finance_phase1_dev', user='finance_owner', password=secret['owner'])
 
 
 def inventory(port):
@@ -52,19 +52,19 @@ def inventory(port):
         return result
 
 
-before = inventory(55432)
+before = inventory(55434)
 started = time.perf_counter()
-pgctl(SOURCE, 'stop', 55432)
+pgctl(SOURCE, 'stop', 55434)
 try:
     shutil.copytree(SOURCE, backup)
 finally:
-    pgctl(SOURCE, 'start', 55432)
+    pgctl(SOURCE, 'start', 55434)
 shutil.copytree(backup, restored)
-pgctl(restored, 'start', 55433)
+pgctl(restored, 'start', 55435)
 try:
-    after = inventory(55433)
+    after = inventory(55435)
     assert before == after, 'Restored database inventory mismatch'
-    with connection(55433) as db:
+    with connection(55435) as db:
         revoked = db.execute('UPDATE login_session SET revoked=true WHERE NOT revoked').rowcount
         assert db.execute('SELECT count(*) FROM login_session WHERE NOT revoked').fetchone()[0] == 0
         from hashlib import sha256
@@ -85,4 +85,4 @@ try:
     (RUNTIME / 'recovery-results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print(json.dumps({k: v for k, v in report.items() if k != 'backup'}, ensure_ascii=False))
 finally:
-    pgctl(restored, 'stop', 55433)
+    pgctl(restored, 'stop', 55435)

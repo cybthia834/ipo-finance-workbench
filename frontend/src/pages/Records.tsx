@@ -13,11 +13,7 @@ import {
   Tag,
   Timeline,
 } from "antd";
-import {
-  PlusOutlined,
-  ReloadOutlined,
-  SafetyCertificateOutlined,
-} from "@ant-design/icons";
+import { PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useWork } from "../App";
 import { acquisitionNames, api } from "../api";
@@ -77,8 +73,9 @@ export function EvidenceList() {
   const [rev, setRev] = useState(0);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
   const { data, loading, error } = useData(
-    `/projects/${ctx.project.id}/evidence?q=${encodeURIComponent(q)}`,
+    `/projects/${ctx.project.id}/evidence?q=${encodeURIComponent(q)}&page=${page}`,
     rev,
   );
   const { run, busy } = useAction(() => setRev((x) => x + 1));
@@ -94,7 +91,7 @@ export function EvidenceList() {
           canCreate && (
             <Button
               type="primary"
-              icon={<PlusOutlined />}
+              icon={<PlusOutlined aria-hidden />}
               onClick={() => setOpen(true)}
             >
               登记目录
@@ -115,16 +112,25 @@ export function EvidenceList() {
           <Input.Search
             placeholder="搜索目录代号"
             allowClear
-            onSearch={setQ}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
             style={{ width: 300 }}
           />
-          <span className="muted">当前有权目录 {data?.length || 0} 份</span>
+          <span className="muted">当前有权目录 {data?.total || 0} 份</span>
         </div>
         <LoadState loading={loading} error={error}>
           <Table<any>
             rowKey="id"
-            dataSource={data}
-            pagination={{ pageSize: 20 }}
+            dataSource={data?.items}
+            pagination={{
+              current: page,
+              pageSize: 20,
+              total: data?.total,
+              showSizeChanger: false,
+              onChange: setPage,
+            }}
             columns={[
               {
                 title: "目录代号",
@@ -437,7 +443,7 @@ export function Issues() {
           ctx.roles.some((r) => ["cfo", "pmo", "reviewer"].includes(r)) && (
             <Button
               type="primary"
-              icon={<PlusOutlined />}
+              icon={<PlusOutlined aria-hidden />}
               onClick={() => {
                 setGap(undefined);
                 issueForm.resetFields();
@@ -480,8 +486,18 @@ export function Issues() {
         <LoadState loading={loading} error={error}>
           <Table<any>
             rowKey="id"
-            dataSource={data}
-            pagination={{ pageSize: 20 }}
+            dataSource={data?.items}
+            pagination={{
+              current: Number(params.get("page") || 1),
+              pageSize: 20,
+              total: data?.total,
+              showSizeChanger: false,
+              onChange: (p) => {
+                const next = new URLSearchParams(params);
+                next.set("page", String(p));
+                setParams(next);
+              },
+            }}
             columns={[
               {
                 title: "优先级",
@@ -681,7 +697,13 @@ export function IssueDetail() {
   const open = (key: string) =>
     run(async () => {
       if (["submit-verification", "verifications"].includes(key))
-        setEvidence(await api(`/projects/${ctx.project.id}/evidence`));
+        setEvidence(
+          (
+            await api(
+              `/projects/${ctx.project.id}/evidence?page_size=100&org_id=${row.org_id}`,
+            )
+          ).items,
+        );
       setAction(key);
     }, "请填写处理意见");
   return (
@@ -882,6 +904,13 @@ export function IssueDetail() {
                 >
                   <Select
                     mode="multiple"
+                    showSearch
+                    filterOption={false}
+                    onSearch={(q) =>
+                      api(
+                        `/projects/${ctx.project.id}/evidence?page_size=100&org_id=${row.org_id}&q=${encodeURIComponent(q)}`,
+                      ).then((d) => setEvidence(d.items))
+                    }
                     options={evidence
                       .filter(
                         (e) =>

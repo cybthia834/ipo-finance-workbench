@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, case, exists, or_, and_
 
 from . import models as m
 from .common import record, require
@@ -20,7 +20,7 @@ def generation_context(db, actor, project_id, payload):
     require(version and version.project_id == project_id and version.state == 'published',
             'TEMPLATE_UNPUBLISHED', '请先独立审核并发布模板', 409)
     orgs = db.scalars(select(m.Organization).where(m.Organization.project_id == project_id,
-                      m.Organization.current.is_(True), m.Organization.id.in_(mem.org_ids))).all()
+                      m.Organization.current.is_(True), m.Organization.id.in_(set(mem.org_ids) & set(payload.get('org_ids', mem.org_ids))))).all()
     periods = db.scalars(select(m.Period).where(m.Period.project_id == project_id, m.Period.current.is_(True))).all()
     templates = db.scalars(select(m.TemplateItem).where(m.TemplateItem.version_id == version.id)).all()
     return project, orgs, periods, templates
@@ -86,3 +86,15 @@ def pack_issues(db, rows):
     people = {x.id: x.display_name for x in db.scalars(select(m.User))}
     return [{**record(r), 'owner_name': people.get(r.owner_id), 'verifier_name': people.get(r.verifier_id),
              'overdue': r.current_due < today() and r.state != 'closed'} for r in rows]
+
+
+def effective_item_state():
+    """Same derived state as pack_items, evaluated in SQL before LIMIT/COUNT."""
+    linked = select(m.EvidenceLink.id).join(m.Evidence, m.Evidence.id == m.EvidenceLink.evidence_id).join(
+        m.Policy, m.Policy.id == m.Evidence.policy_id).join(
+        m.EvidenceVersion, m.EvidenceVersion.id == m.Evidence.current_version_id).where(m.EvidenceLink.item_id == m.Checklist.id)
+    invalid = exists(linked.where(or_(m.Policy.state != 'active', m.Policy.expires_at <= m.now())))
+    restricted = exists(linked.where(m.EvidenceVersion.content['acquisition'].astext == 'restricted'))
+    return case((and_(invalid, m.Checklist.state.in_(['accepted', 'restricted_verified', 'submitted', 'reviewing'])), 'needs_review'),
+                (and_(restricted, m.Checklist.state.in_(['collecting', 'submitted', 'reviewing'])), 'restricted_pending'),
+                else_=m.Checklist.state)

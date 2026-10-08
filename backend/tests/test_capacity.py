@@ -43,7 +43,7 @@ def test_five_users_with_2112_checklists_and_10000_metadata_records(world):
     def exercise(role):
         duration = []
         paths = [f'/projects/{w.pid}/checklists?q=FIN&page_size=20', f'/checklists/{w.items[0]["id"]}',
-                 f'/projects/{w.pid}/issues', f'/projects/{w.pid}/dashboard']
+                 f'/projects/{w.pid}/issues', f'/projects/{w.pid}/dashboard', f'/projects/{w.pid}/evidence?q=CAP&page_size=20']
         for i in range(20):
             started = time.perf_counter(); w.get(role, paths[i % len(paths)])
             duration.append((time.perf_counter() - started) * 1000)
@@ -57,4 +57,9 @@ def test_five_users_with_2112_checklists_and_10000_metadata_records(world):
         'scope': 'TestClient HTTP+real PostgreSQL; excludes network/TLS and browser render latency'}
     Path('.runtime/capacity-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
     assert w.get('pmo', f'/projects/{w.pid}/checklists')['total'] == 2112
+    first = w.get('pmo', f'/projects/{w.pid}/evidence?page_size=100')
+    second = w.get('pmo', f'/projects/{w.pid}/evidence?page_size=100&page=2')
+    assert first['total'] == second['total'] == 10000
+    assert len(first['items']) == len(second['items']) == 100
+    assert not {e['id'] for e in first['items']} & {e['id'] for e in second['items']}
     assert p95 < 3000

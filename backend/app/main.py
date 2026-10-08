@@ -29,7 +29,7 @@ def failure(request, code, message, status):
 async def boundary(request: Request, call_next):
     request.state.trace_id = m.uid(); started = time.monotonic()
     trace_context.set(request.state.trace_id)
-    if request.url.path.startswith(('/api/v1/ai/', '/api/v1/evidence/uploads', '/api/v1/files/')):
+    if request.url.path.startswith(('/api/v1/ai/', '/api/v1/evidence/uploads', '/api/v1/evidence/files/', '/api/v1/files/')):
         try:
             with SessionLocal.begin() as db:
                 audit(db, None, 'disabled_feature', 'feature_denied', result='denied', trace=request.state.trace_id)

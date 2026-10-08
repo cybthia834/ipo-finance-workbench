@@ -1,11 +1,11 @@
 {
   "kind": "local clean-shutdown physical backup",
-  "elapsed_seconds": 2.56,
+  "elapsed_seconds": 1.4,
   "inventory_match": true,
   "manifest_verified": true,
   "references_verified": true,
-  "restored_sessions_revoked": 19,
-  "tables": 31,
-  "backup": ".runtime/recovery/20261008-070900/clean-backup",
+  "restored_sessions_revoked": 17,
+  "tables": 32,
+  "backup": ".runtime/phase1/recovery/20261008-090455/clean-backup",
   "limitation": "Same machine and disk; not production RPO/RTO acceptance or independent disaster recovery."
 }

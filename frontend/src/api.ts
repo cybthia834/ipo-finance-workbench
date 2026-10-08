@@ -9,22 +9,50 @@ export class ApiError extends Error {
   }
 }
 
+const pendingKeys = new Map<string, string>();
+export const clearPendingRequests = () => pendingKeys.clear();
+
 export async function api<T = any>(
   path: string,
   body?: unknown,
   method?: string,
 ): Promise<T> {
-  const response = await fetch(`/api/v1${path}`, {
-    method: method || (body === undefined ? "GET" : "POST"),
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": sessionStorage.getItem("csrf") || "",
-      "Idempotency-Key": crypto.randomUUID(),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  const verb = method || (body === undefined ? "GET" : "POST");
+  const csrf = sessionStorage.getItem("csrf") || "";
+  const fingerprint = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(JSON.stringify([verb, path, body, csrf])),
+      ),
+    ),
+  )
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  const write = !["GET", "HEAD", "OPTIONS"].includes(verb);
+  const key = pendingKeys.get(fingerprint) || crypto.randomUUID();
+  if (write) pendingKeys.set(fingerprint, key);
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1${path}`, {
+      method: verb,
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrf,
+        "Idempotency-Key": key,
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch {
+    throw new ApiError(
+      "NETWORK_UNCERTAIN",
+      "连接中断，结果尚未确认。保持内容不变后重试会沿用同一请求编号。",
+      0,
+    );
+  }
   const result = await response.json();
+  if (response.status < 500) pendingKeys.delete(fingerprint);
   if (!response.ok) {
     if (response.status === 401 && path !== "/auth/login")
       window.dispatchEvent(new Event("session-expired"));

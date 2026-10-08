@@ -23,7 +23,6 @@ import {
   FileDoneOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SearchOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import {
@@ -344,7 +343,8 @@ export function Checklists() {
   const change = (key: string, value?: string) => {
     setSelected([]);
     const p = new URLSearchParams(params);
-    value ? p.set(key, value) : p.delete(key);
+    if (value) p.set(key, value);
+    else p.delete(key);
     p.set("page", "1");
     setParams(p);
   };
@@ -590,7 +590,7 @@ export function Checklists() {
         <Alert
           className="mt16"
           type={job.state === "failed" ? "error" : "info"}
-          title={`生成任务：${({ queued: "等待处理", succeeded: "已完成", failed: "失败" } as any)[job.state] || job.state}`}
+          title={`生成任务：${({ queued: "等待处理", running: "处理中", retry_wait: "等待重试", succeeded: "已完成", failed: "失败" } as any)[job.state] || job.state}`}
           description={
             job.result
               ? `新增 ${job.result.new} 项，已存在 ${job.result.existing} 项`
@@ -694,7 +694,13 @@ export function ChecklistDetail() {
   const reviewer = item?.reviewer_id === me.user.id;
   const openLink = () =>
     run(async () => {
-      setCandidates(await api(`/projects/${ctx.project.id}/evidence`));
+      setCandidates(
+        (
+          await api(
+            `/projects/${ctx.project.id}/evidence?page_size=100&org_id=${item.org_id}&period_id=${item.period_id}`,
+          )
+        ).items,
+      );
       setModal("link");
     }, "已读取可关联目录");
   return (
@@ -739,6 +745,12 @@ export function ChecklistDetail() {
               ]}
             />
             <div className="detail-actions">
+              {data.template_upgrade &&
+                ctx.roles.some((r) => ["cfo", "pmo"].includes(r)) && (
+                  <Button onClick={() => setModal("template")}>
+                    评估新版标准
+                  </Button>
+                )}
               <Button onClick={() => setModal("applicability")}>
                 确认适用性
               </Button>
@@ -861,6 +873,14 @@ export function ChecklistDetail() {
                                     : "受限已核"}
                               </strong>
                               <p>{r.reason}</p>
+                              {r.verification_method && (
+                                <p>
+                                  离线核查方式：{r.verification_method} ·{" "}
+                                  {new Date(r.verified_at).toLocaleString(
+                                    "zh-CN",
+                                  )}
+                                </p>
+                              )}
                               <small className="muted">
                                 {new Date(r.created_at).toLocaleString("zh-CN")}{" "}
                                 · 提交 {r.submission_id.slice(0, 8)}
@@ -941,13 +961,15 @@ export function ChecklistDetail() {
           />
           <Modal
             title={
-              modal === "applicability"
-                ? "确认适用性"
-                : modal === "link"
-                  ? "关联目录版本"
-                  : modal === "review"
-                    ? "独立复核"
-                    : "登记具体缺口"
+              modal === "template"
+                ? "评估新版验收标准"
+                : modal === "applicability"
+                  ? "确认适用性"
+                  : modal === "link"
+                    ? "关联目录版本"
+                    : modal === "review"
+                      ? "独立复核"
+                      : "登记具体缺口"
             }
             open={!!modal}
             onCancel={() => setModal("")}
@@ -977,6 +999,12 @@ export function ChecklistDetail() {
                         (e: any) => e.current_version_id,
                       ),
                     });
+                  if (modal === "template")
+                    await api(`/checklists/${id}/template-decisions`, {
+                      ...v,
+                      expected_version: item.row_version,
+                      new_template_item_id: data.template_upgrade.id,
+                    });
                   if (modal === "gap")
                     await api(`/projects/${ctx.project.id}/gaps`, {
                       ...v,
@@ -986,6 +1014,45 @@ export function ChecklistDetail() {
                 })
               }
             >
+              {modal === "template" && (
+                <>
+                  <Alert
+                    type="info"
+                    className="mb16"
+                    title="采用后需按新标准重新提交复核；原有结论保持不变。"
+                  />
+                  <h4>当前标准</h4>
+                  <p>{item.standard}</p>
+                  <h4>新版标准</h4>
+                  <p>{data.template_upgrade.standard}</p>
+                  <p>检查点：{data.template_upgrade.checks.join("、")}</p>
+                  <Form.Item
+                    name="decision"
+                    label="处理决定"
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      options={[
+                        { value: "adopt", label: "采用新版" },
+                        { value: "retain", label: "保留原标准" },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="reason"
+                    label="判断依据"
+                    rules={[{ required: true, min: 3 }]}
+                  >
+                    <Input.TextArea />
+                  </Form.Item>
+                  {data.template_decisions.map((d: any) => (
+                    <p key={d.id}>
+                      {d.decision === "adopt" ? "已采用" : "已保留"} ·{" "}
+                      {d.reason}
+                    </p>
+                  ))}
+                </>
+              )}
               {modal === "applicability" && (
                 <>
                   <Form.Item
@@ -1020,6 +1087,13 @@ export function ChecklistDetail() {
                   rules={[{ required: true }]}
                 >
                   <Select
+                    showSearch
+                    filterOption={false}
+                    onSearch={(q) =>
+                      api(
+                        `/projects/${ctx.project.id}/evidence?page_size=100&org_id=${item.org_id}&period_id=${item.period_id}&q=${encodeURIComponent(q)}`,
+                      ).then((d) => setCandidates(d.items))
+                    }
                     options={candidates
                       .filter(
                         (e) =>

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / '.runtime' / 'app.env', extra='ignore', hide_input_in_errors=True)
+    model_config = SettingsConfigDict(env_file=ROOT / '.runtime/phase1' / 'app.env', extra='ignore', hide_input_in_errors=True)
     app_env: Literal['development', 'test', 'production'] = 'development'
     database_url: str
     app_origin: str = 'http://127.0.0.1:5173'
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     session_idle_minutes: int = 30
     session_max_hours: int = 8
     export_ttl_hours: int = 24
-    export_storage_root: Path = ROOT / '.runtime' / 'exports'
+    export_storage_root: Path = ROOT / '.runtime/phase1' / 'exports'
     demo_mode: bool = False
 
     @model_validator(mode='after')

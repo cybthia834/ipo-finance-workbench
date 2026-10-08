@@ -19,9 +19,9 @@ def seed():
     if settings.app_env == 'production' or not settings.demo_mode:
         raise RuntimeError('Demo fixtures are disabled in this environment')
     with SessionLocal.begin() as db:
-        target = ROOT / '.runtime/demo-credentials.json'
+        target = ROOT / '.runtime/phase1/demo-credentials.json'
         existing = db.scalars(select(m.User)).all()
-        if existing and (ROOT / '.runtime/demo-seeded').exists():
+        if existing and (ROOT / '.runtime/phase1/demo-seeded').exists():
             print('已有完整演示数据，保留当前记录。'); return
         if existing and not target.exists():
             raise RuntimeError('Existing accounts without demo credentials; initialization refused')
@@ -34,7 +34,7 @@ def seed():
             u = m.User(username=username, display_name=name, password_hash=hasher.hash(password),
                         identity_admin=username in ('cfo', 'it'), must_change_password=False)
             db.add(u); db.flush(); ids[username] = u.id; credentials[username] = password
-    target = ROOT / '.runtime/demo-credentials.json'
+    target = ROOT / '.runtime/phase1/demo-credentials.json'
     target.write_text(json.dumps(credentials, indent=2)); target.chmod(0o600)
     clients = {}
     def call(role, method, path, body=None):
@@ -50,7 +50,7 @@ def seed():
         if result.status_code != 200: raise RuntimeError('Demo login failed')
         c.headers['X-CSRF-Token'] = result.json()['data']['csrf_token']; clients[username] = c
     previous = call('cfo', 'GET', '/me')['projects']
-    project = previous[0] if previous else call('cfo', 'POST', '/projects', {'name': '精工制造 · 上市准备演示', 'exchange': 'unknown',
+    project = previous[0] if previous else call('cfo', 'POST', '/projects', {'initial_cfo_id': ids['cfo'], 'name': '精工制造 · 上市准备演示', 'exchange': 'unknown',
         'organizations': [{'code': 'DEMO-01', 'name': '演示主体一'}, {'code': 'DEMO-02', 'name': '演示主体二'}],
         'periods': [{'label': '2025年度（演示）', 'start': '2025-01-01', 'end': '2025-12-31'}]})
     pid = project['id']; context = call('cfo', 'GET', f'/projects/{pid}/context')
@@ -95,9 +95,9 @@ def seed():
                 'kind': 'missing', 'severity': ['P0', 'P1', 'P2'][i - 7], 'org_id': item['org_id'], 'owner_id': ids['owner'],
                 'verifier_id': ids['reviewer'], 'due': (today() + timedelta(days=i - 9)).isoformat(), 'gap_ids': [gap['id']]})
     for client in clients.values(): client.close()
-    (ROOT / '.runtime/demo-seeded').write_text('completed')
+    (ROOT / '.runtime/phase1/demo-seeded').write_text('completed')
     print('演示数据已创建：66项候选清单、10项已分派、7份虚构目录、3项整改。')
-    print('本地演示账号凭据保存在 .runtime/demo-credentials.json，未输出到日志。')
+    print('本地演示账号凭据保存在 .runtime/phase1/demo-credentials.json，未输出到日志。')
 
 
 if __name__ == '__main__':

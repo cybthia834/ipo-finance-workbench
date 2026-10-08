@@ -62,10 +62,27 @@ def audit(db, actor, object_id, action, project_id=None, result='success', befor
     db.flush()  # Fail closed before a successful response can be built.
 
 
+def lock_identity(db, exclusive=False):
+    mode = 'exclusive' if exclusive else 'shared'
+    held = db.info.get('identity_lock')
+    if held == 'exclusive' or held == mode:
+        return
+    require(not held, 'LOCK_ORDER', '身份锁顺序冲突', 500)
+    fn = 'pg_advisory_xact_lock' if exclusive else 'pg_advisory_xact_lock_shared'
+    db.execute(text(f'SELECT {fn}(hashtextextended(:key, 0))'), {'key': 'identity:phase1'})
+    db.info['identity_lock'] = mode
+
+
 def lock_project(db, project_id):
-    # One transaction per project; appropriate for <= 10 users. All business
-    # commands and workers use this same lock, including snapshot freezing.
-    db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))'), {'key': project_id})
+    # Reads hold a shared lock; writes take exclusive from their first permission
+    # check, avoiding lock upgrades. Identity always precedes project locks.
+    lock_identity(db)
+    held = db.info.setdefault('project_locks', set())
+    if project_id in held:
+        return
+    fn = 'pg_advisory_xact_lock_shared' if db.info.get('read_only_request') else 'pg_advisory_xact_lock'
+    db.execute(text(f'SELECT {fn}(hashtextextended(:key, 0))'), {'key': project_id})
+    held.add(project_id)
 
 
 def check_version(row, expected):
@@ -98,4 +115,4 @@ def command(db, actor, request: Request, payload, fn):
 
 
 def ok(data):
-    return {'data': data, 'as_of': m.now().isoformat()}
+    return {'data': data, 'as_of': m.now().isoformat(), 'trace_id': trace_context.get()}

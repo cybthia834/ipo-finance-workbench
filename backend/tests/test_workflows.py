@@ -274,8 +274,10 @@ def test_worker_transaction_interruption_recovers_without_duplicates(world, monk
         raise RuntimeError('simulated process interruption before commit')
     with monkeypatch.context() as patch:
         patch.setattr(worker, 'generate', interrupted)
-        with pytest.raises(RuntimeError): worker.process_one()
-    assert w.get('pmo', f'/jobs/{job["id"]}')['state'] == 'queued'
+        assert worker.process_one()
+    assert w.get('pmo', f'/jobs/{job["id"]}')['state'] == 'retry_wait'
+    with SessionLocal.begin() as db:
+        db.get(m.Job, job['id']).next_run_at = m.now() - timedelta(seconds=1)
     assert worker.process_one() and not worker.process_one()
     assert w.get('pmo', f'/projects/{w.pid}/checklists')['total'] == 66
 

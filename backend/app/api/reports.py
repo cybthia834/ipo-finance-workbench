@@ -1,8 +1,8 @@
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import func, select
 
 from .. import models as m, schemas as s
@@ -58,7 +58,9 @@ def snapshot_access(db, actor, snap):
     mem = membership(db, actor, snap.project_id, ['cfo', 'pmo'])
     require(set(snap.manifest['org_ids']) <= set(mem.org_ids), 'SNAPSHOT_SCOPE_REVOKED', '快照范围超过当前权限')
     for entry in snap.manifest['evidence']:
-        evidence_access(db, actor, entry['id'])
+        e = evidence_access(db, actor, entry['id'])
+        policy = db.get(m.Policy, e.policy_id)
+        require(set(entry['version']['content']) <= set(policy.allowed_fields), 'SNAPSHOT_FIELDS_REVOKED', '快照字段超出当前准入范围')
     return snap
 
 
@@ -80,7 +82,9 @@ def snapshot_create(project_id: str, body: s.SnapshotInput, request: Request, ac
         snap = m.Snapshot(id=snapshot_id, project_id=project_id, author_id=actor.id, manifest=manifest, manifest_hash=digest(manifest))
         db.add(snap); audit(db, actor, snap.id, 'snapshot_frozen', project_id, after=snap.manifest_hash)
         return record(snap)
-    return ok(command(db, actor, request, body.model_dump(), run))
+    result = command(db, actor, request, body.model_dump(), run)
+    snapshot_access(db, actor, db.get(m.Snapshot, result['id']))
+    return ok(result)
 
 
 @router.get('/projects/{project_id}/snapshots')
@@ -106,7 +110,7 @@ def export_request(snapshot_id: str, body: s.Reason, request: Request, actor: Ac
     lock_project(db, snap.project_id); snapshot_access(db, actor, snap)
     def run():
         approval = m.Approval(project_id=snap.project_id, kind='export', snapshot_id=snap.id, author_id=actor.id,
-            reason=body.reason, payload={'manifest_hash': snap.manifest_hash, 'format': 'directory-csv-v1'})
+            reason=body.reason, payload={'manifest_hash': snap.manifest_hash, 'format': 'directory-xlsx-v1'})
         db.add(approval); db.flush(); audit(db, actor, approval.id, 'export_requested', snap.project_id)
         return record(approval)
     return ok(command(db, actor, request, body.model_dump(), run))
@@ -151,7 +155,8 @@ def decide(approval_id: str, body: s.Decision, request: Request, actor: Actor, d
             else:
                 snap = snapshot_access(db, actor, db.get(m.Snapshot, a.snapshot_id))
                 require(snap.manifest_hash == a.payload['manifest_hash'], 'MANIFEST_MISMATCH', '快照摘要不符', 409)
-                db.add(m.Job(project_id=a.project_id, actor_id=a.author_id, kind='export', payload={'approval_id': a.id}))
+                db.add(m.Job(project_id=a.project_id, actor_id=a.author_id, kind='export',
+                             payload={'approval_id': a.id, 'org_ids': snap.manifest['org_ids']}))
         a.state, a.decider_id, a.decision_reason = ('approved' if body.approve else 'rejected'), actor.id, body.reason
         audit(db, actor, a.id, 'approval_decided', a.project_id)
         return record(a)
@@ -166,20 +171,24 @@ def download(export_id: str, actor: Actor, db: DB):
     require(approval.state == 'approved' and export.expires_at > m.now(), 'EXPORT_EXPIRED', '导出许可已失效')
     path = Path(export.path).resolve(); root = settings.export_storage_root.resolve()
     require(path.is_relative_to(root) and path.is_file(), 'EXPORT_MISSING', '导出文件需要重新生成', 409)
-    require(digest(path.read_bytes()) == export.artifact_hash, 'EXPORT_CORRUPTED', '导出校验失败', 503)
+    blob = path.read_bytes()
+    require(digest(blob) == export.artifact_hash, 'EXPORT_CORRUPTED', '导出校验失败', 503)
     audit(db, actor, export_id, 'export_downloaded', snap.project_id)
-    return FileResponse(path, media_type='application/zip', filename=f'目录快照-{snap.id[:8]}.zip', headers={'Cache-Control': 'no-store'})
+    return Response(blob, media_type='application/zip', headers={'Cache-Control': 'no-store',
+                    'Content-Disposition': f'attachment; filename="snapshot-{snap.id[:8]}.zip"'})
 
 
 @router.get('/projects/{project_id}/audit')
-def audits(project_id: str, actor: Actor, db: DB):
+def audits(project_id: str, actor: Actor, db: DB, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     membership(db, actor, project_id, ['cfo', 'pmo'])
     # Audit endpoint contains IDs only and must be limited to full-project administrators.
     mem = membership(db, actor, project_id)
     all_orgs = set(db.scalars(select(m.Organization.id).where(m.Organization.project_id == project_id)))
     require(all_orgs <= set(mem.org_ids), 'AUDIT_SCOPE', '审计查询需完整项目授权')
-    rows = db.scalars(select(m.AuditEvent).where(m.AuditEvent.project_id == project_id).order_by(m.AuditEvent.created_at.desc()).limit(100)).all()
-    return ok([record(x) for x in rows])
+    query = select(m.AuditEvent).where(m.AuditEvent.project_id == project_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = db.scalars(query.order_by(m.AuditEvent.created_at.desc(), m.AuditEvent.id).offset((page - 1) * page_size).limit(page_size)).all()
+    return ok({'items': [record(x) for x in rows], 'total': total, 'page': page, 'page_size': page_size})
 
 
 @router.post('/projects/{project_id}/metric-samples')

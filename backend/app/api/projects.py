@@ -39,14 +39,17 @@ def scope_create(db, project, body, actor):
 
 
 @router.post('/projects')
-def create_project(body: s.ProjectCreate, request: Request, actor: Actor, db: DB):
+def create_project(body: s.ProjectBootstrap, request: Request, actor: Actor, db: DB):
     require(actor.identity_admin or db.scalar(select(m.Membership.id).where(m.Membership.user_id == actor.id,
                 m.Membership.active.is_(True), m.Membership.roles.contains(['cfo']))), 'ROLE_FORBIDDEN', '需要项目创建权限')
+    principal = db.get(m.User, body.initial_cfo_id)
+    require(principal and principal.active, 'INVALID_ASSIGNEE', '请明确项目财务负责人账号', 422)
+    require(actor.identity_admin or principal.id == actor.id, 'ROLE_FORBIDDEN', '仅身份管理员可初始化其他财务负责人')
     def run():
         project = m.Project(name=body.name, exchange=body.exchange, demo=settings.demo_mode)
         db.add(project); db.flush()
         orgs = scope_create(db, project, body, actor)
-        db.add(m.Membership(project_id=project.id, user_id=actor.id, roles=['cfo', 'pmo'], org_ids=[o.id for o in orgs]))
+        db.add(m.Membership(project_id=project.id, user_id=principal.id, roles=['cfo', 'pmo'], org_ids=[o.id for o in orgs]))
         audit(db, actor, project.id, 'project_created', project.id)
         return record(project)
     return ok(command(db, actor, request, body.model_dump(mode='json'), run))
@@ -105,6 +108,13 @@ def set_membership(project_id: str, body: s.MemberInput, request: Request, actor
         audit(db, actor, body.user_id, 'membership_changed', project_id)
         return record(row)
     return ok(command(db, actor, request, body.model_dump(), run))
+
+
+@router.get('/projects/{project_id}/member-candidates')
+def member_candidates(project_id: str, actor: Actor, db: DB):
+    membership(db, actor, project_id, ['cfo', 'pmo'])
+    return ok([{'id': u.id, 'display_name': u.display_name} for u in
+               db.scalars(select(m.User).where(m.User.active.is_(True)).order_by(m.User.display_name))])
 
 
 @router.post('/memberships/{member_id}/revoke')

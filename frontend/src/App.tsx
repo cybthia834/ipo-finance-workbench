@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Select, Space, Tag } from "antd";
+import { Button, Form, Input, Modal, Select, Space, Tag } from "antd";
 import {
   AppstoreOutlined,
   AuditOutlined,
@@ -10,18 +10,22 @@ import {
   LogoutOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
-  TeamOutlined,
 } from "@ant-design/icons";
 import {
   Navigate,
   NavLink,
   Route,
   Routes,
-  useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { api, type Context, type Me, roleNames } from "./api";
+import {
+  api,
+  clearPendingRequests,
+  type Context,
+  type Me,
+  roleNames,
+} from "./api";
 import { LoadState, useAction, useData } from "./shared";
 import { Dashboard, Checklists, ChecklistDetail } from "./pages/Checklists";
 import {
@@ -31,6 +35,7 @@ import {
   IssueDetail,
 } from "./pages/Records";
 import { Reports, Settings, AuditPage } from "./pages/Management";
+import { Accounts } from "./pages/Accounts";
 import { ScopeEditor } from "./pages/ScopeEditor";
 
 type WorkContext = { ctx: Context; me: Me; base: string; refresh: () => void };
@@ -185,6 +190,7 @@ export default function App() {
   };
   const logout = () => {
     sessionStorage.clear();
+    clearPendingRequests();
     setMe(undefined);
   };
   useEffect(() => {
@@ -205,6 +211,7 @@ export default function App() {
       <div className="empty-project">
         <Logo />
         <h2>账号已登录</h2>
+        {me.user.identity_admin && <Accounts currentUserId={me.user.id} />}
         <p>当前账号没有财务项目授权，请由财务负责人分配项目和主体范围。</p>
         <Space>
           {me.user.identity_admin && (
@@ -256,9 +263,9 @@ export default function App() {
 
 function Shell({ me, logout }: { me: Me; logout: () => void }) {
   const { projectId } = useParams();
+  const [accountsOpen, setAccountsOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const navigate = useNavigate();
-  const location = useLocation();
   const {
     data: ctx,
     loading,
@@ -345,6 +352,9 @@ function Shell({ me, logout }: { me: Me; logout: () => void }) {
               <span className="status-dot" /> 内部协作
             </span>
             {me.demo_mode && <Tag>虚构数据演示</Tag>}
+            {me.user.identity_admin && (
+              <Button onClick={() => setAccountsOpen(true)}>账号管理</Button>
+            )}
           </Space>
         </header>
         <div className="page-content" key={`${projectId}-${me.user.id}`}>
@@ -378,6 +388,15 @@ function Shell({ me, logout }: { me: Me; logout: () => void }) {
             )}
           </LoadState>
         </div>
+        <Modal
+          open={accountsOpen}
+          onCancel={() => setAccountsOpen(false)}
+          footer={null}
+          width={1000}
+          destroyOnHidden
+        >
+          {accountsOpen && <Accounts currentUserId={me.user.id} />}
+        </Modal>
         <footer>
           财务资料与整改工作台{" "}
           <span>数据以当前权限范围展示 · 所有复核结论均需人工确认</span>
