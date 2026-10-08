@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TemplateEditor } from "./TemplateEditor";
 import { ScopeEditor } from "./ScopeEditor";
 import {
   Alert,
-  App,
   Button,
   Card,
   Descriptions,
@@ -24,8 +23,14 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useWork } from "../App";
-import { api, roleNames } from "../api";
-import { LoadState, PageTitle, useAction, useData } from "../shared";
+import { api, downloadExport, roleNames } from "../api";
+import {
+  LoadState,
+  PageTitle,
+  useAction,
+  useData,
+  formatDateTime,
+} from "../shared";
 
 export function Reports() {
   const { ctx, me } = useWork();
@@ -37,29 +42,41 @@ export function Reports() {
     loading,
     error,
   } = useData(`/projects/${ctx.project.id}/snapshots`, rev);
-  const { data: approvals } = useData(
-    `/projects/${ctx.project.id}/approvals`,
-    rev,
-  );
-  const { data: metrics } = useData(`/projects/${ctx.project.id}/metrics`, rev);
+  const {
+    data: approvals,
+    loading: approvalsLoading,
+    error: approvalsError,
+    retry: retryApprovals,
+  } = useData(`/projects/${ctx.project.id}/approvals`, rev);
+  const {
+    data: metrics,
+    loading: metricsLoading,
+    error: metricsError,
+    retry: retryMetrics,
+  } = useData(`/projects/${ctx.project.id}/metrics`, rev);
   const { run, busy } = useAction(() => setRev((x) => x + 1));
-  const { message } = App.useApp();
-  const download = async (id: string) => {
-    const response = await fetch(`/api/v1/exports/${id}/download`, {
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      const x = await response.json();
-      message.error(x.error?.message || "下载失败");
-      return;
-    }
-    const url = URL.createObjectURL(await response.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "财务目录快照.zip";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const { run: runDownload, busy: downloading } = useAction();
+  const activeExports = approvals?.some(
+    (entry: { job?: { state: string } }) =>
+      entry.job &&
+      ["queued", "running", "retry_wait"].includes(entry.job.state),
+  );
+  useEffect(() => {
+    if (!activeExports || approvalsLoading) return;
+    const timer = window.setTimeout(() => {
+      if (!document.hidden) setRev((n) => n + 1);
+    }, 3000);
+    const visible = () => {
+      if (!document.hidden) setRev((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [activeExports, approvalsLoading, approvals]);
+  const download = (id: string) =>
+    runDownload(() => downloadExport(id), "目录包已交给浏览器下载");
   return (
     <>
       <PageTitle
@@ -97,8 +114,7 @@ export function Reports() {
                     columns={[
                       {
                         title: "快照时间",
-                        render: (_: any, r: any) =>
-                          new Date(r.as_of).toLocaleString("zh-CN"),
+                        render: (_: any, r: any) => formatDateTime(r.as_of),
                       },
                       {
                         title: "适用 / 已接受",
@@ -158,74 +174,106 @@ export function Reports() {
                   type="info"
                   title="导出需独立批准，下载时仍检查当前权限"
                 />
-                <Table<any>
-                  rowKey="id"
-                  dataSource={approvals || []}
-                  columns={[
-                    {
-                      title: "申请类型",
-                      dataIndex: "kind",
-                      render: (v) =>
-                        (
-                          ({
-                            export: "目录导出",
-                            extension: "整改延期",
-                            applicability: "不适用审批",
-                          }) as any
-                        )[v],
-                    },
-                    { title: "用途或理由", dataIndex: "reason" },
-                    {
-                      title: "状态",
-                      dataIndex: "state",
-                      render: (v) => (
-                        <Tag color={v === "approved" ? "green" : "default"}>
-                          {
-                            (
-                              {
-                                pending: "待审批",
-                                approved: "已批准",
-                                rejected: "已退回",
-                              } as any
-                            )[v]
-                          }
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "操作",
-                      render: (_: any, r: any) => (
-                        <Space>
-                          {r.state === "pending" &&
-                            r.author_id !== me.user.id &&
-                            ctx.roles.includes("cfo") && (
-                              <>
-                                <Button
-                                  type="link"
-                                  onClick={() => {
-                                    setTarget(r);
-                                    setModal("approve");
-                                  }}
-                                >
-                                  审批
-                                </Button>
-                              </>
-                            )}
-                          {r.export ? (
-                            <Button
-                              icon={<DownloadOutlined />}
-                              onClick={() => download(r.export.id)}
-                            >
-                              下载目录包
-                            </Button>
-                          ) : r.state === "approved" && r.kind === "export" ? (
-                            <span className="muted">后台生成中，请刷新</span>
-                          ) : null}
-                        </Space>
-                      ),
-                    },
-                  ]}
-                />
+                <LoadState
+                  loading={approvalsLoading}
+                  error={approvalsError}
+                  retry={retryApprovals}
+                >
+                  <Table<any>
+                    rowKey="id"
+                    dataSource={approvals || []}
+                    columns={[
+                      {
+                        title: "申请类型",
+                        dataIndex: "kind",
+                        render: (v) =>
+                          (
+                            ({
+                              export: "目录导出",
+                              extension: "整改延期",
+                              applicability: "不适用审批",
+                            }) as any
+                          )[v],
+                      },
+                      { title: "用途或理由", dataIndex: "reason" },
+                      {
+                        title: "状态",
+                        dataIndex: "state",
+                        render: (v) => (
+                          <Tag color={v === "approved" ? "green" : "default"}>
+                            {
+                              (
+                                {
+                                  pending: "待审批",
+                                  approved: "已批准",
+                                  rejected: "已退回",
+                                } as any
+                              )[v]
+                            }
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "操作",
+                        render: (_: any, r: any) => (
+                          <Space>
+                            {r.state === "pending" &&
+                              r.author_id !== me.user.id &&
+                              ctx.roles.includes("cfo") && (
+                                <>
+                                  <Button
+                                    type="link"
+                                    onClick={() => {
+                                      setTarget(r);
+                                      setModal("approve");
+                                    }}
+                                  >
+                                    审批
+                                  </Button>
+                                </>
+                              )}
+                            {r.export ? (
+                              <Button
+                                icon={<DownloadOutlined />}
+                                loading={downloading}
+                                disabled={
+                                  new Date(r.export.expires_at).getTime() <=
+                                  Date.now()
+                                }
+                                onClick={() => download(r.export.id)}
+                              >
+                                {new Date(r.export.expires_at).getTime() <=
+                                Date.now()
+                                  ? "下载已过期"
+                                  : "下载目录包"}
+                              </Button>
+                            ) : r.state === "approved" &&
+                              r.kind === "export" ? (
+                              <span
+                                className={
+                                  r.job?.state === "failed" ? "danger" : "muted"
+                                }
+                              >
+                                {(
+                                  {
+                                    queued: "等待生成",
+                                    running: "正在生成",
+                                    retry_wait: "后台等待重试",
+                                    failed: "生成失败，请联系管理员核对",
+                                    succeeded: "任务完成，产物待核对",
+                                  } as Record<string, string>
+                                )[r.job?.state] || "状态待核对，请刷新"}
+                                {r.job?.error_code
+                                  ? `（${r.job.error_code}）`
+                                  : ""}
+                              </span>
+                            ) : null}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </LoadState>
               </Card>
             ),
           },
@@ -247,21 +295,29 @@ export function Reports() {
                 <p className="muted">
                   净收益扣除实际工时和新增维护成本；负值保留，缺少基线时不计算。
                 </p>
-                <Table
-                  rowKey="task_type"
-                  dataSource={metrics || []}
-                  columns={[
-                    { title: "任务类型", dataIndex: "task_type" },
-                    { title: "基线样本", dataIndex: "baseline_count" },
-                    { title: "实际完成量", dataIndex: "actual_count" },
-                    {
-                      title: "净节省工时",
-                      dataIndex: "net_minutes",
-                      render: (v: number | null) =>
-                        v === null ? "暂无可计算基线" : `${v.toFixed(1)} 分钟`,
-                    },
-                  ]}
-                />
+                <LoadState
+                  loading={metricsLoading}
+                  error={metricsError}
+                  retry={retryMetrics}
+                >
+                  <Table
+                    rowKey="task_type"
+                    dataSource={metrics || []}
+                    columns={[
+                      { title: "任务类型", dataIndex: "task_type" },
+                      { title: "基线样本", dataIndex: "baseline_count" },
+                      { title: "实际完成量", dataIndex: "actual_count" },
+                      {
+                        title: "净节省工时",
+                        dataIndex: "net_minutes",
+                        render: (v: number | null) =>
+                          v === null
+                            ? "暂无可计算基线"
+                            : `${v.toFixed(1)} 分钟`,
+                      },
+                    ]}
+                  />
+                </LoadState>
               </Card>
             ),
           },

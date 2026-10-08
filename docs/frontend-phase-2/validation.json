@@ -1,0 +1,172 @@
+{
+  "date": "2026-10-08",
+  "branch": "phase-2-frontend",
+  "base_commit": "79fb7ea",
+  "chrome": "154.0.8037.98",
+  "viewports": [
+    [
+      1440,
+      1050
+    ],
+    [
+      1280,
+      800
+    ],
+    [
+      768,
+      1024
+    ],
+    [
+      390,
+      844
+    ]
+  ],
+  "static_checks": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "production_build": "passed"
+  },
+  "unit": {
+    "runner": "node --test",
+    "tests": 5,
+    "passed": 5
+  },
+  "backend": {
+    "tests": 40,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "browser": {
+    "stats": {
+      "startTime": "2026-10-08T03:04:27.703Z",
+      "duration": 54317.824,
+      "expected": 16,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "checks": [
+      {
+        "name": "real pages fit 1440px with usable navigation and dialogs",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "real pages fit 1280px with usable navigation and dialogs",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "real pages fit 768px with usable navigation and dialogs",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "real pages fit 390px with usable navigation and dialogs",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "filters, detail return, saved view and clear remain consistent",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "generation survives refresh and one confirmation submits one job",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "a lost generation response retries the original operation without a duplicate job",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "session service failure stays retryable instead of pretending logged out",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "failed checklist and report panels never become successful empty tables",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "period dashboard drilldown preserves the same underlying issue count",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "PMO navigates real business pages; all runtime requests stay local",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "owner sees assigned tasks and cannot open management data",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "PMO creates a frozen snapshot through the visible form",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "CFO can inspect scope form and published template safely",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "directory registration, independent review and version invalidation through actual forms",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      },
+      {
+        "name": "IT can reach account administration without a finance project",
+        "status": "expected",
+        "attempts": [
+          "passed"
+        ]
+      }
+    ]
+  },
+  "remaining": [
+    "Complete phase-2 acceptance matrix",
+    "Cross-refresh unknown-write reconciliation",
+    "Complete DTO and output schema migration",
+    "200% browser zoom and full keyboard workflow",
+    "Actual mobile and company browser validation",
+    "Browser end-to-end capacity P95"
+  ]
+}

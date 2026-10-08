@@ -44,10 +44,17 @@ test("directory registration, independent review and version invalidation throug
     ).json()
   ).data.items;
   const item = items.find(
-    (i: any) => i.owner_id && i.workflow_state === "collecting",
+    (i: any) =>
+      i.owner_id &&
+      ["collecting", "needs_review", "returned"].includes(i.workflow_state),
   );
   expect(item).toBeTruthy();
+  const oldDetail = (
+    await (await page.request.get(`/api/v1/checklists/${item.id}`)).json()
+  ).data;
+  const previousReviews = oldDetail.reviews.length;
   const code = `E2E-${Date.now()}`;
+  const conclusion = `逐项核查虚构目录 ${code}，符合本项验收要求`;
   await switchUser(page, "owner");
   await page.locator("nav").getByRole("link", { name: "资料目录" }).click();
   await page.getByRole("button", { name: "登记目录", exact: true }).click();
@@ -82,9 +89,7 @@ test("directory registration, independent review and version invalidation throug
     .getByRole("checkbox")
     .all())
     await box.check();
-  await page
-    .getByLabel("结论及具体补充动作", { exact: true })
-    .fill("逐项核查虚构目录，符合本项验收要求");
+  await page.getByLabel("结论及具体补充动作", { exact: true }).fill(conclusion);
   await page.getByRole("button", { name: "确认提交", exact: true }).click();
   await expect(page.locator(".ant-modal")).toHaveCount(0);
   await expect(page.getByText("已接受", { exact: true })).toBeVisible();
@@ -106,10 +111,10 @@ test("directory registration, independent review and version invalidation throug
   await expect(page.locator(".ant-modal")).toHaveCount(0);
   await page.goto(`/projects/${pid}/checklists/${item.id}`);
   await expect(page.getByText("待重新复核", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "复核历史 (1)" }).click();
-  await expect(
-    page.getByText("逐项核查虚构目录，符合本项验收要求", { exact: true }),
-  ).toBeVisible();
+  await page
+    .getByRole("tab", { name: `复核历史 (${previousReviews + 1})` })
+    .click();
+  await expect(page.getByText(conclusion, { exact: true })).toBeVisible();
 });
 
 test("IT can reach account administration without a finance project", async ({

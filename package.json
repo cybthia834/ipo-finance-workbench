@@ -15,7 +15,8 @@
     "db:prepare": "node scripts/prepare-postgres.mjs",
     "format": "prettier --write frontend/src scripts/*.mjs tests/e2e playwright.config.ts",
     "lint": "eslint frontend/src",
-    "test:backend": ".venv/bin/pytest backend/tests -q"
+    "test:backend": ".venv/bin/pytest backend/tests -q",
+    "test:unit": "node --test tests/unit/*.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

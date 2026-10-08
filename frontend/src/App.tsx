@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { Button, Form, Input, Modal, Select, Space, Tag } from "antd";
+import { Button, Drawer, Form, Input, Modal, Select, Space, Tag } from "antd";
 import {
   AppstoreOutlined,
   AuditOutlined,
@@ -8,6 +8,8 @@ import {
   FileProtectOutlined,
   FolderOutlined,
   LogoutOutlined,
+  MenuOutlined,
+  CloseOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -21,6 +23,8 @@ import {
 } from "react-router-dom";
 import {
   api,
+  ApiError,
+  errorMessage,
   clearPendingRequests,
   type Context,
   type Me,
@@ -82,7 +86,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
       </div>
       <div className="login-form">
         <div className="login-box">
-          <Tag color="green">第一阶段 · 目录模式</Tag>
+          <Tag>财务协作 · 目录模式</Tag>
           <h2>登录工作台</h2>
           <p>使用分配给你的独立账号，继续财务准备工作。</p>
           <Form
@@ -141,7 +145,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
 function PasswordReset({ loggedOut }: { loggedOut: () => void }) {
   const { run, busy } = useAction();
   return (
-    <div className="login-page">
+    <div className="login-page password-page">
       <div className="login-box">
         <h2>设置个人密码</h2>
         <p>首次登录需要更换初始密码。</p>
@@ -181,28 +185,55 @@ export default function App() {
   const [newProject, setNewProject] = useState(false);
   const [me, setMe] = useState<Me>();
   const [checking, setChecking] = useState(true);
+  const [sessionError, setSessionError] = useState("");
   const load = () => {
+    const controller = new AbortController();
     setChecking(true);
-    api<Me>("/me")
-      .then(setMe)
-      .catch(() => setMe(undefined))
-      .finally(() => setChecking(false));
+    setSessionError("");
+    api<Me>("/me", undefined, undefined, { signal: controller.signal })
+      .then((value) => {
+        if (!controller.signal.aborted) setMe(value);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 401) logout();
+        else setSessionError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setChecking(false);
+      });
+    return () => controller.abort();
   };
   const logout = () => {
-    sessionStorage.clear();
+    sessionStorage.removeItem("csrf");
     clearPendingRequests();
     setMe(undefined);
+    setSessionError("");
+    setChecking(false);
   };
   useEffect(() => {
-    load();
+    const cancel = load();
     window.addEventListener("session-expired", logout);
-    return () => window.removeEventListener("session-expired", logout);
+    return () => {
+      cancel();
+      window.removeEventListener("session-expired", logout);
+    };
   }, []);
   if (checking)
     return (
       <LoadState loading error="">
         {null}
       </LoadState>
+    );
+  if (sessionError)
+    return (
+      <div className="empty-project">
+        <Logo />
+        <h2>暂时无法确认登录状态</h2>
+        <LoadState loading={false} error={sessionError} retry={load}>
+          {null}
+        </LoadState>
+      </div>
     );
   if (!me) return <Login onLogin={load} />;
   if (me.user.must_change_password) return <PasswordReset loggedOut={logout} />;
@@ -265,11 +296,25 @@ function Shell({ me, logout }: { me: Me; logout: () => void }) {
   const { projectId } = useParams();
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
+  const [mobile, setMobile] = useState(
+    () => window.matchMedia("(max-width: 900px)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 900px)");
+    const update = () => {
+      setMobile(query.matches);
+      if (!query.matches) setNavOpen(false);
+    };
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   const navigate = useNavigate();
   const {
     data: ctx,
     loading,
     error,
+    retry,
   } = useData<Context>(`/projects/${projectId}/context`, revision);
   const base = `/projects/${projectId}`;
   const manager = ctx?.roles.some((r) => ["cfo", "pmo"].includes(r));
@@ -279,75 +324,122 @@ function Shell({ me, logout }: { me: Me; logout: () => void }) {
     ["evidence", "资料目录", <FolderOutlined />],
     ["issues", "整改台账", <AuditOutlined />],
   ] as const;
+  const sidebar = (
+    <aside className="sidebar">
+      <div className="sidebar-brand-row">
+        <Logo />
+        <Button
+          className="sidebar-close"
+          type="text"
+          aria-label="关闭导航"
+          icon={<CloseOutlined />}
+          onClick={() => setNavOpen(false)}
+        />
+      </div>
+      <div className="workspace-label">项目工作空间</div>
+      <Select
+        className="project-select"
+        aria-label="切换项目"
+        value={projectId}
+        options={me.projects.map((p) => ({ value: p.id, label: p.name }))}
+        onChange={(id) => {
+          setNavOpen(false);
+          navigate(`/projects/${id}/dashboard`);
+        }}
+      />
+      <nav
+        aria-label="主导航"
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest("a")) setNavOpen(false);
+        }}
+      >
+        <div className="nav-heading">工作台</div>
+        {links.map(([path, name, icon]) => (
+          <NavLink key={path} to={`${base}/${path}`} aria-label={name}>
+            {icon}
+            <span>{name}</span>
+          </NavLink>
+        ))}
+        {manager && (
+          <>
+            <div className="nav-heading">项目管理</div>
+            <NavLink to={`${base}/reports`} aria-label="报表与快照">
+              <DatabaseOutlined />
+              <span>报表与快照</span>
+            </NavLink>
+            <NavLink to={`${base}/settings`} aria-label="项目设置">
+              <SettingOutlined />
+              <span>项目设置</span>
+            </NavLink>
+            <NavLink to={`${base}/audit`} aria-label="审计记录">
+              <FileProtectOutlined />
+              <span>审计记录</span>
+            </NavLink>
+          </>
+        )}
+      </nav>
+      <div className="sidebar-bottom">
+        <div className="mode-note">
+          <SafetyCertificateOutlined />
+          <div>
+            目录模式<small>资料原件保持在线下</small>
+          </div>
+          <span className="status-dot" />
+        </div>
+        <div className="user">
+          <span className="avatar">{me.user.display_name[0]}</span>
+          <div>
+            <strong>{me.user.display_name.split(" · ")[0]}</strong>
+            <small>{ctx?.roles.map((r) => roleNames[r]).join(" / ")}</small>
+          </div>
+          <Button
+            type="text"
+            aria-label="退出登录"
+            icon={<LogoutOutlined />}
+            onClick={async () => {
+              await api("/auth/logout", {});
+              logout();
+            }}
+          />
+        </div>
+      </div>
+    </aside>
+  );
   return (
     <div className="workspace">
-      <aside className="sidebar">
-        <Logo />
-        <div className="workspace-label">项目工作空间</div>
-        <Select
-          className="project-select"
-          value={projectId}
-          options={me.projects.map((p) => ({ value: p.id, label: p.name }))}
-          onChange={(id) => navigate(`/projects/${id}/dashboard`)}
-        />
-        <nav>
-          <div className="nav-heading">工作台</div>
-          {links.map(([path, name, icon]) => (
-            <NavLink key={path} to={`${base}/${path}`}>
-              {icon}
-              <span>{name}</span>
-            </NavLink>
-          ))}
-          {manager && (
-            <>
-              <div className="nav-heading">项目管理</div>
-              <NavLink to={`${base}/reports`}>
-                <DatabaseOutlined />
-                <span>报表与快照</span>
-              </NavLink>
-              <NavLink to={`${base}/settings`}>
-                <SettingOutlined />
-                <span>项目设置</span>
-              </NavLink>
-              <NavLink to={`${base}/audit`}>
-                <FileProtectOutlined />
-                <span>审计记录</span>
-              </NavLink>
-            </>
-          )}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="mode-note">
-            <SafetyCertificateOutlined />
-            <div>
-              目录模式<small>资料原件保持在线下</small>
-            </div>
-            <span className="status-dot" />
-          </div>
-          <div className="user">
-            <span className="avatar">{me.user.display_name[0]}</span>
-            <div>
-              <strong>{me.user.display_name.split(" · ")[0]}</strong>
-              <small>{ctx?.roles.map((r) => roleNames[r]).join(" / ")}</small>
-            </div>
-            <Button
-              type="text"
-              aria-label="退出登录"
-              icon={<LogoutOutlined />}
-              onClick={async () => {
-                await api("/auth/logout", {});
-                logout();
-              }}
-            />
-          </div>
-        </div>
-      </aside>
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
+      {!mobile && <div className="desktop-sidebar">{sidebar}</div>}
+      <Drawer
+        open={mobile && navOpen}
+        onClose={() => setNavOpen(false)}
+        placement="left"
+        size={292}
+        closable={false}
+        destroyOnHidden
+        className="nav-drawer"
+        aria-label="工作台导航"
+      >
+        {sidebar}
+      </Drawer>
       <main className="main">
         <header className="topbar">
-          <div>
-            财务工作空间 <span>/</span> {ctx?.project.name || "项目"}
+          <div className="breadcrumbs">
+            <Button
+              className="mobile-menu"
+              type="text"
+              aria-label="打开导航"
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen(true)}
+              icon={<MenuOutlined />}
+            />
+            <span className="breadcrumb-root">财务工作空间</span> <span>/</span>{" "}
+            <strong className="breadcrumb-project">
+              {ctx?.project.name || "项目"}
+            </strong>
           </div>
-          <Space>
+          <div className="topbar-meta">
             <span className="internal-badge">
               <span className="status-dot" /> 内部协作
             </span>
@@ -355,10 +447,15 @@ function Shell({ me, logout }: { me: Me; logout: () => void }) {
             {me.user.identity_admin && (
               <Button onClick={() => setAccountsOpen(true)}>账号管理</Button>
             )}
-          </Space>
+          </div>
         </header>
-        <div className="page-content" key={`${projectId}-${me.user.id}`}>
-          <LoadState loading={loading} error={error}>
+        <div
+          className="page-content"
+          id="main-content"
+          tabIndex={-1}
+          key={`${projectId}-${me.user.id}`}
+        >
+          <LoadState loading={loading} error={error} retry={retry}>
             {ctx && (
               <Work.Provider
                 value={{

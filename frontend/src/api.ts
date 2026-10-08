@@ -4,66 +4,194 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public trace?: string,
+    public resultUncertain = false,
   ) {
     super(message);
   }
 }
 
+export type ApiEnvelope<T> = { data: T; as_of: string; trace_id: string };
+export type RequestOptions = { signal?: AbortSignal; timeout?: number };
 const pendingKeys = new Map<string, string>();
-export const clearPendingRequests = () => pendingKeys.clear();
-
+const activeRequests = new Set<AbortController>();
+let sessionRevision = 0;
+export const clearPendingRequests = () => {
+  sessionRevision++;
+  pendingKeys.clear();
+  activeRequests.forEach((controller) => controller.abort());
+  activeRequests.clear();
+};
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError)
+    return `${error.resultUncertain && !/确认|核对/.test(error.message) ? "操作结果尚未确认。" : ""}${error.message}${error.trace ? `（追踪号 ${error.trace.slice(0, 12)}）` : ""}`;
+  return error instanceof Error ? error.message : "暂时无法完成，请稍后重试";
+}
+async function request(
+  path: string,
+  body: unknown,
+  method: string | undefined,
+  options: RequestOptions,
+  binary = false,
+): Promise<{ response: Response; value: unknown }> {
+  const verb = method || (body === undefined ? "GET" : "POST");
+  const write = !["GET", "HEAD", "OPTIONS"].includes(verb);
+  const csrf = sessionStorage.getItem("csrf") || "";
+  const revision = sessionRevision;
+  const fingerprint = write
+    ? Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(JSON.stringify([verb, path, body, csrf])),
+          ),
+        ),
+      )
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+    : "";
+  if (revision !== sessionRevision || options.signal?.aborted)
+    throw new DOMException("请求已停止等待", "AbortError");
+  const key = write ? pendingKeys.get(fingerprint) || crypto.randomUUID() : "";
+  if (write) pendingKeys.set(fingerprint, key);
+  const controller = new AbortController();
+  activeRequests.add(controller);
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  let timedOut = false;
+  const timer = window.setTimeout(
+    () => {
+      timedOut = true;
+      controller.abort();
+    },
+    options.timeout ?? (write ? 30000 : 15000),
+  );
+  try {
+    const response = await fetch(`/api/v1${path}`, {
+      method: verb,
+      credentials: "same-origin",
+      signal: controller.signal,
+      headers: {
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(write ? { "X-CSRF-Token": csrf, "Idempotency-Key": key } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    if (response.status === 401 && path !== "/auth/login" && path !== "/me")
+      window.dispatchEvent(new Event("session-expired"));
+    let value: unknown;
+    if (binary && response.ok) value = await response.blob();
+    else {
+      try {
+        value = await response.json();
+      } catch {
+        throw new ApiError(
+          "INVALID_RESPONSE",
+          write
+            ? "返回结果无法确认，请先核对记录，勿重复创建。"
+            : "服务返回格式异常，请重试或联系管理员。",
+          response.status,
+          response.headers.get("X-Trace-ID") || undefined,
+          write,
+        );
+      }
+    }
+    if (!response.ok) {
+      const problem = object(value) && object(value.error) ? value.error : {};
+      const trace =
+        object(value) && typeof value.trace_id === "string"
+          ? value.trace_id
+          : response.headers.get("X-Trace-ID") || undefined;
+      if (response.status < 500) pendingKeys.delete(fingerprint);
+      throw new ApiError(
+        typeof problem.code === "string" ? problem.code : "REQUEST_FAILED",
+        typeof problem.message === "string"
+          ? problem.message
+          : "请求暂时失败，请稍后重试",
+        response.status,
+        trace,
+        write && response.status >= 500,
+      );
+    }
+    if (
+      !binary &&
+      (!object(value) ||
+        !("data" in value) ||
+        typeof value.as_of !== "string" ||
+        typeof value.trace_id !== "string")
+    ) {
+      throw new ApiError(
+        "INVALID_RESPONSE",
+        "响应缺少必要字段，请刷新后核对结果。",
+        response.status,
+        undefined,
+        write,
+      );
+    }
+    pendingKeys.delete(fingerprint);
+    return { response, value };
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (controller.signal.aborted && !timedOut)
+      throw new DOMException("请求已停止等待", "AbortError");
+    throw new ApiError(
+      write ? "NETWORK_UNCERTAIN" : "NETWORK_ERROR",
+      write
+        ? "连接中断或等待超时，结果尚未确认。请先核对记录；同页保持内容不变重试会沿用原请求编号。"
+        : "暂时无法连接服务，请检查网络后重试。",
+      0,
+      undefined,
+      write,
+    );
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+    activeRequests.delete(controller);
+  }
+}
+// Legacy callers retain their existing generic until migrated domain by domain.
+export async function apiEnvelope<T = any>(
+  path: string,
+  body?: unknown,
+  method?: string,
+  options: RequestOptions = {},
+): Promise<ApiEnvelope<T>> {
+  const { value } = await request(path, body, method, options);
+  return value as ApiEnvelope<T>;
+}
 export async function api<T = any>(
   path: string,
   body?: unknown,
   method?: string,
+  options: RequestOptions = {},
 ): Promise<T> {
-  const verb = method || (body === undefined ? "GET" : "POST");
-  const csrf = sessionStorage.getItem("csrf") || "";
-  const fingerprint = Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(JSON.stringify([verb, path, body, csrf])),
-      ),
-    ),
-  )
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  const write = !["GET", "HEAD", "OPTIONS"].includes(verb);
-  const key = pendingKeys.get(fingerprint) || crypto.randomUUID();
-  if (write) pendingKeys.set(fingerprint, key);
-  let response: Response;
-  try {
-    response = await fetch(`/api/v1${path}`, {
-      method: verb,
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrf,
-        "Idempotency-Key": key,
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
+  return (await apiEnvelope<T>(path, body, method, options)).data;
+}
+export async function downloadExport(id: string): Promise<void> {
+  const { value } = await request(
+    `/exports/${encodeURIComponent(id)}/download`,
+    undefined,
+    "GET",
+    { timeout: 60000 },
+    true,
+  );
+  if (!(value instanceof Blob) || !value.type.includes("zip"))
     throw new ApiError(
-      "NETWORK_UNCERTAIN",
-      "连接中断，结果尚未确认。保持内容不变后重试会沿用同一请求编号。",
+      "INVALID_FILE",
+      "导出文件格式异常，请联系管理员核对。",
       0,
     );
-  }
-  const result = await response.json();
-  if (response.status < 500) pendingKeys.delete(fingerprint);
-  if (!response.ok) {
-    if (response.status === 401 && path !== "/auth/login")
-      window.dispatchEvent(new Event("session-expired"));
-    throw new ApiError(
-      result.error?.code || "REQUEST_FAILED",
-      result.error?.message || "请求暂时失败",
-      response.status,
-      result.trace_id,
-    );
-  }
-  return result.data;
+  const url = URL.createObjectURL(value);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "财务目录快照.zip";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type User = {

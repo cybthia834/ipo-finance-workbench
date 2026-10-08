@@ -130,7 +130,13 @@ def approvals(project_id: str, actor: Actor, db: DB):
         try: approval_access(db, actor, a)
         except DomainError: continue
         export = db.scalar(select(m.Export).where(m.Export.approval_id == a.id))
-        result.append({**record(a), 'export': record(export, ('path',)) if export else None})
+        job = db.scalar(select(m.Job).where(m.Job.project_id == project_id, m.Job.kind == 'export',
+                         m.Job.payload['approval_id'].as_string() == a.id).order_by(m.Job.created_at.desc()).limit(1)) if a.kind == 'export' else None
+        # Approval access above controls this summary; never expose execution tokens,
+        # raw payloads or paths, and do not broaden GET /jobs ownership permissions.
+        job_summary = {'id': job.id, 'state': job.state, 'attempts': job.attempts,
+                       'error_code': job.error_code, 'next_run_at': job.next_run_at.isoformat() if job.next_run_at else None} if job else None
+        result.append({**record(a), 'export': record(export, ('path',)) if export else None, 'job': job_summary})
     return ok(result)
 
 
@@ -192,11 +198,13 @@ def audits(project_id: str, actor: Actor, db: DB, page: int = Query(1, ge=1), pa
 
 
 @router.post('/projects/{project_id}/metric-samples')
-def metric(project_id: str, body: s.MetricInput, actor: Actor, db: DB):
+def metric(project_id: str, body: s.MetricInput, request: Request, actor: Actor, db: DB):
     membership(db, actor, project_id, ['cfo', 'pmo'])
-    row = m.MetricSample(project_id=project_id, actor_id=actor.id, **body.model_dump()); db.add(row); db.flush()
-    audit(db, actor, row.id, 'metric_recorded', project_id)
-    return ok(record(row))
+    def run():
+        row = m.MetricSample(project_id=project_id, actor_id=actor.id, **body.model_dump()); db.add(row); db.flush()
+        audit(db, actor, row.id, 'metric_recorded', project_id)
+        return record(row)
+    return ok(command(db, actor, request, body.model_dump(), run))
 
 
 @router.get('/projects/{project_id}/metrics')
@@ -219,8 +227,10 @@ def views(actor: Actor, db: DB):
 
 
 @router.post('/me/views')
-def save_view(body: s.ViewInput, actor: Actor, db: DB):
+def save_view(body: s.ViewInput, request: Request, actor: Actor, db: DB):
     membership(db, actor, body.project_id)
     require(set(body.filters) <= {'q', 'org_id', 'period_id', 'applicability', 'state', 'domain', 'mine'}, 'INVALID_FILTER', '筛选条件无效', 422)
-    row = m.PersonalView(user_id=actor.id, **body.model_dump()); db.add(row); db.flush()
-    return ok(record(row))
+    def run():
+        row = m.PersonalView(user_id=actor.id, **body.model_dump()); db.add(row); db.flush()
+        return record(row)
+    return ok(command(db, actor, request, body.model_dump(), run))

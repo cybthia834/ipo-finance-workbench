@@ -1,0 +1,18 @@
+:root {
+  --ink: #17191c;
+  --paper: #ffffff;
+  --fog: #fafafb;
+  --mist: #f2f2f3;
+  --muted: #666b75;
+  --line: #e9e9ec;
+  --peach: #fbe1d1;
+  --sienna: #5d2a1a;
+  --danger: #b33b36;
+  --sidebar-width: 242px;
+  --font-body:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  --font-display:
+    "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", SimSun, Georgia,
+    serif;
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -30,11 +30,14 @@ import {
   useNavigate,
   useParams,
   useSearchParams,
+  useLocation,
 } from "react-router-dom";
 import { useWork } from "../App";
 import { api, domainNames, stateNames } from "../api";
 import {
   ApplicabilityTag,
+  DataStamp,
+  formatDateTime,
   LoadState,
   NoData,
   PageTitle,
@@ -43,11 +46,43 @@ import {
   useData,
 } from "../shared";
 
+import {
+  checklistFilters,
+  parseChecklistPage,
+  type ChecklistPage,
+  type ChecklistRow,
+  type GenerationPreview,
+  type AssignmentResult,
+  type DashboardData,
+  type PersonalView,
+} from "../features/checklists/contracts";
+import { GenerationTask } from "../features/checklists/GenerationTask";
+
 export function Dashboard() {
   const { ctx, me, base } = useWork();
-  const [org, setOrg] = useState<string>();
-  const { data, loading, error } = useData(
-    `/projects/${ctx.project.id}/dashboard${org ? `?org_id=${org}` : ""}`,
+  const [dashboardParams, setDashboardParams] = useSearchParams();
+  const org = ctx.organizations.some(
+    (o) => o.id === dashboardParams.get("org_id"),
+  )
+    ? dashboardParams.get("org_id") || undefined
+    : undefined;
+  const period = ctx.periods.some(
+    (p) => p.id === dashboardParams.get("period_id"),
+  )
+    ? dashboardParams.get("period_id") || undefined
+    : undefined;
+  const range = new URLSearchParams();
+  if (org) range.set("org_id", org);
+  if (period) range.set("period_id", period);
+  const rangeQuery = range.toString();
+  const changeRange = (key: string, value?: string) => {
+    const next = new URLSearchParams(range);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setDashboardParams(next);
+  };
+  const { data, loading, error, asOf, retry } = useData<DashboardData>(
+    `/projects/${ctx.project.id}/dashboard?${rangeQuery}`,
   );
   const navigate = useNavigate();
   const c = data?.counts;
@@ -59,28 +94,42 @@ export function Dashboard() {
         action={
           <Space>
             <Select
+              aria-label="首页主体"
               placeholder="全部授权主体"
               allowClear
               value={org}
-              onChange={setOrg}
+              onChange={(value) => changeRange("org_id", value)}
               style={{ width: 170 }}
               options={ctx.organizations.map((o) => ({
                 value: o.id,
                 label: o.name,
               }))}
             />
+            <Select
+              aria-label="首页期间"
+              placeholder="全部期间"
+              allowClear
+              value={period}
+              onChange={(value) => changeRange("period_id", value)}
+              style={{ width: 150 }}
+              options={ctx.periods.map((p) => ({
+                value: p.id,
+                label: p.label,
+              }))}
+            />
             <Button
               icon={<UnorderedListOutlined />}
-              onClick={() => navigate(`${base}/checklists`)}
+              onClick={() => navigate(`${base}/checklists?${rangeQuery}`)}
             >
               查看清单
             </Button>
           </Space>
         }
       />
-      <LoadState loading={loading} error={error}>
-        {data && (
+      <LoadState loading={loading} error={error} retry={retry}>
+        {data && c && (
           <>
+            <DataStamp asOf={asOf} />
             <div className="overview">
               <div className="overview-copy">
                 <span className="eyebrow">PROJECT OVERVIEW</span>
@@ -111,11 +160,11 @@ export function Dashboard() {
                   type="circle"
                   percent={c.completion || 0}
                   size={100}
-                  strokeColor="#a9d5b2"
-                  railColor="rgba(255,255,255,.14)"
+                  strokeColor="#5d2a1a"
+                  railColor="rgba(93,42,26,.10)"
                   format={() => (
                     <CheckCircleOutlined
-                      style={{ color: "#cce8d1", fontSize: 32 }}
+                      style={{ color: "#5d2a1a", fontSize: 32 }}
                     />
                   )}
                 />
@@ -156,10 +205,10 @@ export function Dashboard() {
                   onClick={() =>
                     navigate(
                       filter === "issues"
-                        ? `${base}/issues?state=open${org ? `&org_id=${org}` : ""}`
+                        ? `${base}/issues?state=open${rangeQuery ? `&${rangeQuery}` : ""}`
                         : filter === "overdue"
-                          ? `${base}/issues?overdue=true${org ? `&org_id=${org}` : ""}`
-                          : `${base}/checklists?${filter}${org ? `&org_id=${org}` : ""}`,
+                          ? `${base}/issues?overdue=true${rangeQuery ? `&${rangeQuery}` : ""}`
+                          : `${base}/checklists?${filter}${rangeQuery ? `&${rangeQuery}` : ""}`,
                     )
                   }
                 >
@@ -184,18 +233,18 @@ export function Dashboard() {
                   </>
                 }
                 extra={
-                  <Link to={`${base}/checklists`}>
+                  <Link to={`${base}/checklists?${rangeQuery}`}>
                     查看全部 <ArrowRightOutlined />
                   </Link>
                 }
               >
                 <div className="domain-list">
-                  {data.domains.map((d: any) => (
+                  {data.domains.map((d) => (
                     <button
                       key={d.domain}
                       onClick={() =>
                         navigate(
-                          `${base}/checklists?domain=${d.domain}${org ? `&org_id=${org}` : ""}`,
+                          `${base}/checklists?domain=${d.domain}${rangeQuery ? `&${rangeQuery}` : ""}`,
                         )
                       }
                     >
@@ -231,14 +280,14 @@ export function Dashboard() {
                   </>
                 }
                 extra={
-                  <Link to={`${base}/issues`}>
+                  <Link to={`${base}/issues?${rangeQuery}`}>
                     整改台账 <ArrowRightOutlined />
                   </Link>
                 }
               >
                 {data.urgent_issues.length ? (
                   <div className="urgent-list">
-                    {data.urgent_issues.slice(0, 4).map((r: any) => (
+                    {data.urgent_issues.slice(0, 4).map((r) => (
                       <Link to={`${base}/issues/${r.id}`} key={r.id}>
                         <Space>
                           <Tag color={r.severity === "P0" ? "red" : "orange"}>
@@ -270,7 +319,11 @@ export function Dashboard() {
                   我的待办 <Tag>{data.todo.length}</Tag>
                 </>
               }
-              extra={<Link to={`${base}/checklists?mine=true`}>查看全部</Link>}
+              extra={
+                <Link to={`${base}/checklists?mine=true&${rangeQuery}`}>
+                  查看全部
+                </Link>
+              }
             >
               <Table
                 size="small"
@@ -281,7 +334,7 @@ export function Dashboard() {
                 columns={[
                   {
                     title: "资料需求",
-                    render: (_: any, r: any) => (
+                    render: (_: unknown, r: ChecklistRow) => (
                       <Link to={`${base}/checklists/${r.id}`}>
                         <span className="code">{r.topic_code}</span>
                         {r.title}
@@ -290,7 +343,7 @@ export function Dashboard() {
                   },
                   {
                     title: "主体 / 期间",
-                    render: (_: any, r: any) => (
+                    render: (_: unknown, r: ChecklistRow) => (
                       <span className="muted">
                         {r.org_name} · {r.period_label}
                       </span>
@@ -304,7 +357,7 @@ export function Dashboard() {
                   { title: "截止日期", dataIndex: "due" },
                   {
                     title: "下一步",
-                    render: (_: any, r: any) => (
+                    render: (_: unknown, r: ChecklistRow) => (
                       <Link to={`${base}/checklists/${r.id}`}>
                         {r.reviewer_id === me.user.id ? "去复核" : "去处理"}{" "}
                         <ArrowRightOutlined />
@@ -331,22 +384,51 @@ export function Checklists() {
   const [rev, setRev] = useState(0);
   const [selected, setSelected] = useState<React.Key[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [preview, setPreview] = useState<any>();
-  const [job, setJob] = useState<any>();
+  const [preview, setPreview] = useState<GenerationPreview>();
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewsRevision, setViewsRevision] = useState(0);
+  const {
+    data: views,
+    error: viewsError,
+    loading: viewsLoading,
+    retry: retryViews,
+  } = useData<PersonalView[]>("/me/views", viewsRevision);
+  const filterParams = checklistFilters(params, ctx);
+  const filterQuery = filterParams.toString();
+  const jobId = params.get("job_id");
+  const [query, setQuery] = useState(filterParams.get("q") || "");
+  useEffect(() => {
+    setQuery(checklistFilters(params, ctx).get("q") || "");
+  }, [params, ctx]);
   const reload = () => setRev((x) => x + 1);
   const { run, busy } = useAction(reload);
   const manager = ctx.roles.some((r) => ["pmo", "cfo"].includes(r));
-  const { data, loading, error } = useData(
-    `/projects/${ctx.project.id}/checklists?${params}`,
+  const { data, loading, error, asOf, retry } = useData<ChecklistPage>(
+    `/projects/${ctx.project.id}/checklists?${filterQuery}`,
     rev,
+    parseChecklistPage,
   );
+  const replaceFilters = (values: URLSearchParams) => {
+    const next = checklistFilters(values, ctx);
+    if (jobId) next.set("job_id", jobId);
+    setSelected([]);
+    setParams(next);
+  };
+  const scopeLabel = `${ctx.organizations.filter((o) => o.current).length} 个主体 · ${ctx.periods.filter((p) => p.current).length} 个期间 · 范围 V${ctx.project.scope_version}`;
+  useEffect(() => {
+    if (data && data.page > 1 && !data.items.length) {
+      const next = new URLSearchParams(params);
+      next.set("page", "1");
+      setParams(next, { replace: true });
+    }
+  }, [data, params, setParams]);
   const change = (key: string, value?: string) => {
     setSelected([]);
-    const p = new URLSearchParams(params);
+    const p = new URLSearchParams(filterParams);
     if (value) p.set(key, value);
     else p.delete(key);
     p.set("page", "1");
-    setParams(p);
+    replaceFilters(p);
   };
   const generation = {
     template_version_id: ctx.project.template_version_id,
@@ -356,7 +438,7 @@ export function Checklists() {
     <>
       <PageTitle
         title="财务资料清单"
-        subtitle="按主体与期间跟踪适用性、责任分工和当前资料版本。"
+        subtitle={`按主体与期间跟踪适用性、责任分工和当前资料版本。${scopeLabel}`}
         action={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={reload}>
@@ -365,12 +447,12 @@ export function Checklists() {
             {manager && (
               <Button
                 type="primary"
-                icon={<PlusOutlined />}
+                icon={<PlusOutlined aria-hidden />}
                 loading={busy}
                 onClick={() =>
                   run(async () => {
                     setPreview(
-                      await api(
+                      await api<GenerationPreview>(
                         `/projects/${ctx.project.id}/checklist-previews`,
                         generation,
                       ),
@@ -384,6 +466,64 @@ export function Checklists() {
           </Space>
         }
       />
+      <div className="saved-views" aria-label="清单视图">
+        {[
+          ["全部资料", ""],
+          ["我的待办", "mine=true"],
+          ["待复核", "state=submitted"],
+          ["逾期资料", "state=overdue"],
+          ["受限资料", "state=restricted"],
+        ].map(([label, value]) => (
+          <Button
+            key={label}
+            type={filterQuery === value ? "primary" : "default"}
+            onClick={() => replaceFilters(new URLSearchParams(value))}
+          >
+            {label}
+          </Button>
+        ))}
+        <Select
+          aria-label="个人视图"
+          placeholder="个人视图"
+          loading={viewsLoading}
+          value={undefined}
+          style={{ minWidth: 130 }}
+          options={(views || [])
+            .filter((v) => v.project_id === ctx.project.id)
+            .map((v) => ({ value: v.id, label: v.name }))}
+          onChange={(id) => {
+            const view = views?.find(
+              (v) => v.id === id && v.project_id === ctx.project.id,
+            );
+            if (view) replaceFilters(new URLSearchParams(view.filters));
+          }}
+        />
+        <Button type="text" onClick={() => setViewOpen(true)}>
+          另存个人视图
+        </Button>
+      </div>
+      {viewsError && (
+        <Alert
+          className="mb16"
+          type="warning"
+          title="个人视图暂时无法读取"
+          description={viewsError}
+          action={<Button onClick={retryViews}>重试</Button>}
+        />
+      )}
+      {jobId && (
+        <GenerationTask
+          key={jobId}
+          id={jobId}
+          projectId={ctx.project.id}
+          onCompleted={reload}
+          onDismiss={() => {
+            const next = new URLSearchParams(params);
+            next.delete("job_id");
+            setParams(next, { replace: true });
+          }}
+        />
+      )}
       {ctx.project.exchange === "unknown" && (
         <Alert
           className="mb16"
@@ -398,14 +538,16 @@ export function Checklists() {
           <Input.Search
             placeholder="搜索主题编号或资料需求"
             allowClear
-            defaultValue={params.get("q") || ""}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
             onSearch={(v) => change("q", v)}
             style={{ width: 270 }}
           />
           <Select
+            aria-label="主体筛选"
             placeholder="全部主体"
             allowClear
-            value={params.get("org_id") || undefined}
+            value={filterParams.get("org_id") || undefined}
             onChange={(v) => change("org_id", v)}
             options={ctx.organizations.map((o) => ({
               value: o.id,
@@ -413,9 +555,18 @@ export function Checklists() {
             }))}
           />
           <Select
+            aria-label="报告期间"
+            placeholder="全部期间"
+            allowClear
+            value={filterParams.get("period_id") || undefined}
+            onChange={(v) => change("period_id", v)}
+            options={ctx.periods.map((p) => ({ value: p.id, label: p.label }))}
+          />
+          <Select
+            aria-label="财务领域"
             placeholder="全部领域"
             allowClear
-            value={params.get("domain") || undefined}
+            value={filterParams.get("domain") || undefined}
             onChange={(v) => change("domain", v)}
             options={Object.entries(domainNames).map(([value, label]) => ({
               value,
@@ -423,9 +574,10 @@ export function Checklists() {
             }))}
           />
           <Select
+            aria-label="适用性筛选"
             placeholder="适用性"
             allowClear
-            value={params.get("applicability") || undefined}
+            value={filterParams.get("applicability") || undefined}
             onChange={(v) => change("applicability", v)}
             options={[
               { value: "pending", label: "待确认" },
@@ -434,9 +586,10 @@ export function Checklists() {
             ]}
           />
           <Select
+            aria-label="资料进度"
             placeholder="全部进度"
             allowClear
-            value={params.get("state") || undefined}
+            value={filterParams.get("state") || undefined}
             onChange={(v) => change("state", v)}
             options={Object.entries(stateNames)
               .filter(
@@ -450,13 +603,25 @@ export function Checklists() {
               )
               .map(([value, label]) => ({ value, label }))}
           />
-          <Button type="text" onClick={() => setParams({})}>
+          <Button
+            type="text"
+            onClick={() => {
+              setQuery("");
+              replaceFilters(new URLSearchParams());
+            }}
+          >
             清空筛选
           </Button>
         </div>
         <div className="list-toolbar">
           <Space>
-            <strong>{data?.total || 0} 项资料需求</strong>
+            <strong className="filter-count">
+              {data
+                ? `${data.total} 项资料需求`
+                : loading
+                  ? "正在读取资料需求…"
+                  : "资料需求待读取"}
+            </strong>
             <span className="muted">适用性与复核进度分别记录</span>
           </Space>
           {manager && (
@@ -468,8 +633,20 @@ export function Checklists() {
             </Button>
           )}
         </div>
-        <LoadState loading={loading} error={error}>
-          <Table<any>
+        <DataStamp asOf={asOf} />
+        <LoadState loading={loading} error={error} retry={retry}>
+          <Table<ChecklistRow>
+            locale={{
+              emptyText: (
+                <NoData
+                  text={
+                    filterQuery
+                      ? "没有符合筛选条件的资料，可清空筛选重试"
+                      : "暂无资料需求，可由项目管理员生成清单"
+                  }
+                />
+              ),
+            }}
             rowKey="id"
             scroll={{ x: 1080 }}
             dataSource={data?.items}
@@ -479,8 +656,8 @@ export function Checklists() {
                 : undefined
             }
             pagination={{
-              current: Number(params.get("page") || 1),
-              pageSize: Number(params.get("page_size") || 20),
+              current: Number(filterParams.get("page") || 1),
+              pageSize: Number(filterParams.get("page_size") || 20),
               total: data?.total,
               showSizeChanger: true,
               pageSizeOptions: [20, 50, 100],
@@ -496,10 +673,11 @@ export function Checklists() {
               {
                 title: "资料需求",
                 width: 330,
-                render: (_: any, r: any) => (
+                render: (_: unknown, r: ChecklistRow) => (
                   <Link
                     className="item-title"
                     to={`${base}/checklists/${r.id}`}
+                    state={{ listSearch: `?${filterQuery}` }}
                   >
                     <span className="code">{r.topic_code}</span>
                     <strong>{r.title}</strong>
@@ -509,7 +687,7 @@ export function Checklists() {
               {
                 title: "主体 / 期间",
                 width: 190,
-                render: (_: any, r: any) => (
+                render: (_: unknown, r: ChecklistRow) => (
                   <div>
                     {r.org_name}
                     <div className="table-secondary">{r.period_label}</div>
@@ -531,7 +709,7 @@ export function Checklists() {
               {
                 title: "经办 / 复核",
                 width: 150,
-                render: (_: any, r: any) => (
+                render: (_: unknown, r: ChecklistRow) => (
                   <div>
                     {r.owner_name?.split(" · ")[0] || "待分派"}
                     <div className="table-secondary">
@@ -543,7 +721,7 @@ export function Checklists() {
               {
                 title: "截止日期",
                 width: 120,
-                render: (_: any, r: any) => (
+                render: (_: unknown, r: ChecklistRow) => (
                   <span className={r.overdue ? "danger" : ""}>
                     {r.due || "待确定"}
                   </span>
@@ -559,13 +737,16 @@ export function Checklists() {
         onCancel={() => setPreview(undefined)}
         confirmLoading={busy}
         okText="确认生成"
+        okButtonProps={{ "aria-label": "确认生成", "aria-busy": busy }}
         onOk={() =>
           run(async () => {
-            const j = await api(
+            const j = await api<{ id: string }>(
               `/projects/${ctx.project.id}/checklist-jobs`,
               generation,
             );
-            setJob(j);
+            const next = new URLSearchParams(params);
+            next.set("job_id", j.id);
+            setParams(next);
             setPreview(undefined);
           }, "生成任务已提交")
         }
@@ -574,11 +755,13 @@ export function Checklists() {
           column={2}
           items={
             preview
-              ? ["total", "new", "existing", "pending"].map((key, i) => ({
-                  key,
-                  label: ["预计总项数", "新增", "已存在", "待确认适用性"][i],
-                  children: preview[key],
-                }))
+              ? (["total", "new", "existing", "pending"] as const).map(
+                  (key, i) => ({
+                    key,
+                    label: ["预计总项数", "新增", "已存在", "待确认适用性"][i],
+                    children: preview[key],
+                  }),
+                )
               : []
           }
         />
@@ -586,30 +769,6 @@ export function Checklists() {
           已有复核及整改记录保留。新增项需要人工确认适用性。
         </p>
       </Modal>
-      {job && (
-        <Alert
-          className="mt16"
-          type={job.state === "failed" ? "error" : "info"}
-          title={`生成任务：${({ queued: "等待处理", running: "处理中", retry_wait: "等待重试", succeeded: "已完成", failed: "失败" } as any)[job.state] || job.state}`}
-          description={
-            job.result
-              ? `新增 ${job.result.new} 项，已存在 ${job.result.existing} 项`
-              : job.error_code || "可刷新查询当前进度"
-          }
-          action={
-            <Button
-              onClick={() =>
-                run(
-                  async () => setJob(await api(`/jobs/${job.id}`)),
-                  "任务状态已更新",
-                )
-              }
-            >
-              查询进度
-            </Button>
-          }
-        />
-      )}
       <Modal
         title="批量分派责任"
         open={assignOpen}
@@ -621,22 +780,25 @@ export function Checklists() {
           layout="vertical"
           onFinish={(v) =>
             run(async () => {
-              const result = await api("/checklists/assignments", {
-                rows: (data?.items || [])
-                  .filter((r: any) => selected.includes(r.id))
-                  .map((r: any) => ({
-                    item_id: r.id,
-                    expected_version: r.row_version,
-                    ...v,
-                  })),
-              });
-              const failed = result.results.filter((r: any) => !r.success);
+              const result = await api<AssignmentResult>(
+                "/checklists/assignments",
+                {
+                  rows: (data?.items || [])
+                    .filter((r) => selected.includes(r.id))
+                    .map((r) => ({
+                      item_id: r.id,
+                      expected_version: r.row_version,
+                      ...v,
+                    })),
+                },
+              );
+              const failed = result.results.filter((r) => !r.success);
               if (failed.length) {
                 reload();
-                setSelected(failed.map((r: any) => r.id));
+                setSelected(failed.flatMap((r) => (r.id ? [r.id] : [])));
               }
               if (failed.length)
-                throw new Error(failed.map((r: any) => r.message).join("；"));
+                throw new Error(failed.map((r) => r.message).join("；"));
               setAssignOpen(false);
               setSelected([]);
             })
@@ -676,12 +838,69 @@ export function Checklists() {
           </Button>
         </Form>
       </Modal>
+      <Modal
+        title="另存个人视图"
+        open={viewOpen}
+        onCancel={() => setViewOpen(false)}
+        footer={null}
+        destroyOnHidden
+      >
+        <p className="muted">只保存当前筛选，不保存资料副本；仅你本人可见。</p>
+        <Form
+          layout="vertical"
+          onFinish={(v) =>
+            run(async () => {
+              const filters = Object.fromEntries(filterParams);
+              delete filters.page;
+              delete filters.page_size;
+              await api("/me/views", {
+                project_id: ctx.project.id,
+                name: v.name,
+                filters,
+              });
+              setViewsRevision((n) => n + 1);
+              setViewOpen(false);
+            }, "个人视图已保存")
+          }
+        >
+          <Form.Item
+            label="视图名称"
+            name="name"
+            rules={[
+              { required: true, whitespace: true, max: 80 },
+              {
+                validator: async (_, value: string) => {
+                  if (
+                    views?.some(
+                      (v) =>
+                        v.project_id === ctx.project.id &&
+                        v.name === value?.trim(),
+                    )
+                  )
+                    throw new Error("已有同名个人视图，请使用其他名称");
+                },
+              },
+            ]}
+          >
+            <Input placeholder="例如：本期收入资料" maxLength={80} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={busy}>
+            保存个人视图
+          </Button>
+        </Form>
+      </Modal>
     </>
   );
 }
 
 export function ChecklistDetail() {
   const { id } = useParams();
+  const location = useLocation();
+  const [detailParams, setDetailParams] = useSearchParams();
+  const locationState = location.state as { listSearch?: string } | null;
+  const listSearch = checklistFilters(
+    new URLSearchParams(locationState?.listSearch || ""),
+  ).toString();
   const { ctx, me, base } = useWork();
   const [rev, setRev] = useState(0);
   const reload = () => setRev((x) => x + 1);
@@ -707,7 +926,10 @@ export function ChecklistDetail() {
     <LoadState loading={loading} error={error}>
       {item && (
         <>
-          <Link className="backlink" to={`${base}/checklists`}>
+          <Link
+            className="backlink"
+            to={`${base}/checklists${listSearch ? `?${listSearch}` : ""}`}
+          >
             ← 返回资料清单
           </Link>
           <PageTitle
@@ -798,6 +1020,16 @@ export function ChecklistDetail() {
             />
           )}
           <Tabs
+            activeKey={
+              ["evidence", "reviews", "gaps"].includes(
+                detailParams.get("tab") || "",
+              )
+                ? detailParams.get("tab")!
+                : "evidence"
+            }
+            onChange={(tab) =>
+              setDetailParams({ tab }, { replace: true, state: location.state })
+            }
             items={[
               {
                 key: "evidence",
@@ -876,14 +1108,12 @@ export function ChecklistDetail() {
                               {r.verification_method && (
                                 <p>
                                   离线核查方式：{r.verification_method} ·{" "}
-                                  {new Date(r.verified_at).toLocaleString(
-                                    "zh-CN",
-                                  )}
+                                  {formatDateTime(r.verified_at)}
                                 </p>
                               )}
                               <small className="muted">
-                                {new Date(r.created_at).toLocaleString("zh-CN")}{" "}
-                                · 提交 {r.submission_id.slice(0, 8)}
+                                {formatDateTime(r.created_at)} · 提交{" "}
+                                {r.submission_id.slice(0, 8)}
                               </small>
                             </>
                           ),

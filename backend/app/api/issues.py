@@ -46,12 +46,15 @@ def new_issue(project_id: str, body: s.IssueCreate, request: Request, actor: Act
 
 @router.get('/projects/{project_id}/issues')
 def issues(project_id: str, actor: Actor, db: DB, state: str | None = None, severity: str | None = None,
-           org_id: str | None = None, overdue: bool = False, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+           org_id: str | None = None, period_id: str | None = None, overdue: bool = False, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     query = issue_query(db, actor, project_id)
     if state == 'open': query = query.where(m.Issue.state != 'closed')
     elif state: query = query.where(m.Issue.state == state)
     if severity: query = query.where(m.Issue.severity == severity)
     if org_id: query = query.where(m.Issue.org_id == org_id)
+    if period_id:
+        related = select(m.IssueGap.issue_id).join(m.Gap, m.Gap.id == m.IssueGap.gap_id).join(m.Checklist, m.Checklist.id == m.Gap.item_id).where(m.Checklist.period_id == period_id)
+        query = query.where(m.Issue.id.in_(related))
     if overdue: query = query.where(m.Issue.current_due < today(), m.Issue.state != 'closed')
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     rows = pack_issues(db, db.scalars(query.order_by(m.Issue.severity, m.Issue.current_due, m.Issue.id)

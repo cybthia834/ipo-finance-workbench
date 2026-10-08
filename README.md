@@ -4,6 +4,16 @@
 
 开发以根目录《技术适配声明》V0.2 和《第一阶段技术开发文档》V0.2 为方案基线。实际进度、验证结果与尚未完成事项见 [开发实施记录](docs/开发实施记录.md)。当前不代表整个第一阶段已验收或已在公司内网上线。
 
+前端开发现位于 `phase-2-frontend`，从一期成果 `79fb7ea` 分出。视觉按用户指定的 Refero Steep 参考调整，当前实现和截图见 [前端开发实施记录](docs/frontend-phase-2/开发实施记录.md)，完整目标见 [第二阶段前端开发技术文档](第二阶段前端开发技术文档.md)。
+
+## 源码与阶段成果
+
+GitHub 仓库为 [cybthia834/ipo-finance-workbench](https://github.com/cybthia834/ipo-finance-workbench)。`main` 保存上传的开发成果，`phase-2-frontend` 保留前端开发分支，`phase-1-complete` 保留一期基线 `79fb7ea`。
+
+当前支持目录登记、独立复核、换版重核、整改、快照及审批导出。2026-10-08 的阶段验证记录为 40 项后端测试、16 项浏览器测试和 5 项单元测试通过，具体条件及剩余工作见 [验证记录](docs/frontend-phase-2/开发实施记录.md#验证记录)。源码上传不等于已经完成内网部署或真实业务验收。
+
+![财务工作台首页，使用虚构演示数据](docs/frontend-phase-2/images/dashboard-1440.png)
+
 ## 本机启动
 
 已验证环境为 macOS arm64、Python 3.14.7、Node.js 24.18.0、npm 11.16.0。以下命令从项目根目录执行。
@@ -52,6 +62,7 @@ npm run dev
 ```sh
 npm run lint
 npm run typecheck
+npm run test:unit
 npm run build
 .venv/bin/pytest backend/tests -q --junitxml=.runtime/phase1/backend-results.xml
 npm run test:e2e

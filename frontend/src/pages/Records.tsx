@@ -123,6 +123,7 @@ export function EvidenceList() {
         <LoadState loading={loading} error={error}>
           <Table<any>
             rowKey="id"
+            scroll={{ x: 980 }}
             dataSource={data?.items}
             pagination={{
               current: page,

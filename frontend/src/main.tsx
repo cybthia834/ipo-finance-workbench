@@ -4,33 +4,12 @@ import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { theme } from "./theme/tokens";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: "#216653",
-          borderRadius: 7,
-          colorText: "#243c35",
-          colorBgLayout: "#f6f7f4",
-          fontFamily:
-            '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif',
-          fontSize: 13,
-        },
-        components: {
-          Table: {
-            headerBg: "#f7f8f5",
-            headerColor: "#718078",
-            cellPaddingBlock: 15,
-          },
-          Button: { controlHeight: 36 },
-          Menu: { itemBorderRadius: 6 },
-        },
-      }}
-    >
+    <ConfigProvider locale={zhCN} theme={theme}>
       <AntApp>
         <BrowserRouter>
           <App />
